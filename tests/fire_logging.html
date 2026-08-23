@@ -1,0 +1,51 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Wildroot fire damage and managed logging test</title>
+<style>body{font-family:monospace} iframe{width:1400px;height:1000px;border:0}</style>
+<pre id="result">RUNNING</pre>
+<iframe id="game" src="../index.html?test=fire-logging"></iframe>
+<script>
+  localStorage.clear();
+  const result = document.getElementById("result");
+  const frame = document.getElementById("game");
+
+  const runTest = () => {
+    const win = frame.contentWindow;
+    const doc = frame.contentDocument;
+    if (!doc.getElementById("scenarioModeButton") || frame.dataset.tested === "true") return;
+    frame.dataset.tested = "true";
+    const checks = [];
+    const check = (name, pass, detail = "") => checks.push({ name, pass: Boolean(pass), detail });
+    try {
+      doc.getElementById("scenarioModeButton").click();
+      doc.querySelector('[data-scenario="burned_watershed"]').click();
+      const canvas = doc.getElementById("gameCanvas");
+
+      check("After the Fire records damaged standing trees", Number(canvas.dataset.standingBurnedTrees) > 0, canvas.dataset.standingBurnedTrees);
+      check("damaged tree rules are exposed", canvas.dataset.burnedTreeLeafState === "permanent-leafless" && canvas.dataset.burnedTreeColour === "black" && canvas.dataset.burnedTreeTimberReductionPercent === "30", `${canvas.dataset.burnedTreeLeafState} · ${canvas.dataset.burnedTreeColour} · ${canvas.dataset.burnedTreeTimberReductionPercent}%`);
+
+      let burnedTree = null;
+      for (let y = 0; y < 100 && !burnedTree; y++) {
+        for (let x = 0; x < 100; x++) {
+          const info = win.__wildrootTest.burnedTreeInfo(x, y);
+          if (info.standing && info.burned) { burnedTree = info; break; }
+        }
+      }
+      const expectedYield = burnedTree ? Math.round(burnedTree.baseYield * 0.7 * 10) / 10 : null;
+      check("damaged trees stay black and winter-bare", burnedTree?.leafAmount === 0 && burnedTree?.evergreen === false && burnedTree?.trunkColour === "#111111", JSON.stringify(burnedTree));
+      check("damaged trees yield exactly 30% less", burnedTree?.timberYield === expectedYield && burnedTree?.timberMultiplier === 0.7, JSON.stringify(burnedTree));
+
+      const managedFirst = win.__wildrootTest.loggingTargetOrder(false, true, true);
+      const priorityFirst = win.__wildrootTest.loggingTargetOrder(true, true, true);
+      check("mature Wood Farm trees outrank unmarked wild trees", managedFirst?.kind === "farm" && managedFirst?.priority === false, JSON.stringify(managedFirst));
+      check("manual tree priority remains strongest", priorityFirst?.kind === "wild" && priorityFirst?.priority === true, JSON.stringify(priorityFirst));
+    } catch (error) {
+      checks.push({ name: "uncaught test error", pass: false, detail: String(error?.stack || error) });
+    }
+    const passed = checks.every(item => item.pass);
+    result.textContent = `${passed ? "PASS" : "FAIL"}\n` + checks.map(item => `${item.pass ? "✓" : "✗"} ${item.name}${item.detail ? ` — ${item.detail}` : ""}`).join("\n");
+    document.title = passed ? "PASS" : "FAIL";
+  };
+  frame.addEventListener("load", runTest);
+  window.addEventListener("load", runTest);
+</script>

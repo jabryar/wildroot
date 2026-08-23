@@ -1,0 +1,51 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Wildroot visual preview</title>
+<style>html,body,iframe{width:100%;height:100%;margin:0;border:0;overflow:hidden}</style>
+<iframe id="game" src="../index.html"></iframe>
+<script>
+  const frame = document.getElementById("game");
+  const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+  frame.addEventListener("load", async () => {
+    const win = frame.contentWindow;
+    const doc = frame.contentDocument;
+    const clickTile = (x, y) => {
+      const canvas = doc.getElementById("gameCanvas");
+      const rect = canvas.getBoundingClientRect();
+      const scale = 28 * 0.85;
+      const canvasX = 384 + (x + .5 - 50) * scale;
+      const canvasY = 384 + (y + .5 - 50) * scale;
+      const options = {
+        bubbles: true,
+        pointerId: 4,
+        pointerType: "mouse",
+        button: 0,
+        buttons: 1,
+        clientX: rect.left + (canvasX / 768) * rect.width,
+        clientY: rect.top + (canvasY / 768) * rect.height
+      };
+      canvas.dispatchEvent(new win.PointerEvent("pointerdown", options));
+      canvas.dispatchEvent(new win.PointerEvent("pointerup", { ...options, buttons: 0 }));
+    };
+    doc.getElementById("beginGameButton").click();
+    await wait(100);
+    doc.querySelector(".tutorial-skip").click();
+    await wait(250);
+    for (const [type, x, y] of [["cottage",46,47],["farm",55,47],["well",46,53],["forester",55,54],["lumber",41,49]]) {
+      doc.querySelector(`[data-building="${type}"]`).click();
+      if (type === "farm") win.dispatchEvent(new win.KeyboardEvent("keydown", { key: "p", bubbles: true }));
+      clickTile(x,y);
+      await wait(120);
+    }
+    doc.getElementById("inspectTool").click();
+    const canvas = doc.getElementById("gameCanvas");
+    const rect = canvas.getBoundingClientRect();
+    const scale = 28 * .85;
+    canvas.dispatchEvent(new win.PointerEvent("pointermove", {
+      bubbles: true, pointerId: 5, pointerType: "mouse",
+      clientX: rect.left + ((384 + (41.5 - 50) * scale) / 768) * rect.width,
+      clientY: rect.top + ((384 + (49.5 - 50) * scale) / 768) * rect.height
+    }));
+    doc.getElementById("pauseButton").click();
+  }, { once:true });
+</script>

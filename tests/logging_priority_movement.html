@@ -1,0 +1,131 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Wildroot priority logging and nighttime movement test</title>
+<style>body{font-family:monospace} iframe{width:1400px;height:1000px;border:0}</style>
+<pre id="result">RUNNING</pre>
+<iframe id="game" style="width:1400px;height:1000px;border:0"></iframe>
+<script>
+  localStorage.setItem("wildroot-village-save-v1", JSON.stringify({
+    version: 2,
+    villageName: "Nightwood",
+    difficulty: "balanced",
+    day: 10,
+    dayProgress: .6,
+    speed: 1,
+    paused: true,
+    weather: "mild",
+    weatherFrom: "mild",
+    weatherBlend: 1,
+    nextWeatherChange: 99,
+    nextEventDay: 100,
+    population: 14,
+    demographics: { children: 0, adults: 14, elders: 0 },
+    ecosystem: { forest: 96, wildlife: 90, water: 92, soil: 92, air: 94, biodiversity: 92 },
+    resources: { food: 300, water: 300, wood: 100, stone: 100 },
+    terrainSeed: 12873465,
+    buildings: [
+      { type: "hearth", x: 49, y: 49, rotation: 0, builtDay: 1, id: 1 },
+      { type: "cottage", x: 46, y: 52, rotation: 0, builtDay: 3, id: 2 },
+      { type: "lumber", x: 40, y: 48, rotation: 0, builtDay: 4, id: 3, loggingProgress: 0, stumpProgress: 0 },
+      { type: "well", x: 53, y: 50, rotation: 0, builtDay: 5, id: 4 }
+    ],
+    nextBuildingId: 5,
+    loggedTrees: {},
+    clearedTiles: {},
+    priorityTrees: {},
+    remoteStumps: {},
+    camera: { x: 50, y: 50, zoom: .85 }
+  }));
+
+  const frame = document.getElementById("game");
+  const result = document.getElementById("result");
+  const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const pointOptions = (canvas, worldX, worldY, pointerId = 81) => {
+    const rect = canvas.getBoundingClientRect();
+    const scale = 28 * .85;
+    return {
+      bubbles: true, pointerId, pointerType: "mouse", button: 0, buttons: 1,
+      clientX: rect.left + ((384 + (worldX - 50) * scale) / 768) * rect.width,
+      clientY: rect.top + ((384 + (worldY - 50) * scale) / 768) * rect.height
+    };
+  };
+  const moveToWorld = (win, canvas, worldX, worldY) => {
+    const options = pointOptions(canvas, worldX, worldY);
+    canvas.dispatchEvent(new win.PointerEvent("pointermove", { ...options, buttons: 0 }));
+  };
+  const holdWorld = async (win, canvas, worldX, worldY) => {
+    const options = pointOptions(canvas, worldX, worldY, 82);
+    canvas.dispatchEvent(new win.PointerEvent("pointermove", { ...options, buttons: 0 }));
+    canvas.dispatchEvent(new win.PointerEvent("pointerdown", options));
+    await wait(760);
+    canvas.dispatchEvent(new win.PointerEvent("pointerup", { ...options, buttons: 0 }));
+  };
+
+  frame.addEventListener("load", async () => {
+    const win = frame.contentWindow;
+    const doc = frame.contentDocument;
+    const checks = [];
+    const check = (name, pass, detail = "") => checks.push({ name, pass: Boolean(pass), detail });
+    try {
+      await wait(250);
+      doc.getElementById("continueGameButton").click();
+      await wait(350);
+      const canvas = doc.getElementById("gameCanvas");
+      doc.getElementById("inspectTool").click();
+      doc.querySelector('[data-speed="3"]').click();
+      win.__wildrootTest.step(15000);
+
+      check("staffed logging stops completely at night", canvas.dataset.staffedProductionActive === "false" && canvas.dataset.loggedTrees === "0" && canvas.dataset.activeLoggingFellers === "0" && canvas.dataset.activeLoggingMultiplier === "0", `${canvas.dataset.loggedTrees} stumps · ${canvas.dataset.activeLoggingFellers} fellers · ${canvas.dataset.activeLoggingMultiplier}x`);
+      check("worker-free Well production continues at night", canvas.dataset.passiveProductionActive === "true" && Number(canvas.dataset.currentRateWater) > 0 && Number(canvas.dataset.passiveBuildingsOperating) >= 3, `${canvas.dataset.currentRateWater} water/day now · ${canvas.dataset.passiveBuildingsOperating} automatic buildings`);
+      check("xx/day trends remain full-day averages at night", canvas.dataset.productionRateDisplay === "24-hour-average" && Number(canvas.dataset.productionRateWood) > 0 && Number(canvas.dataset.currentRateWood) < 0 && doc.getElementById("woodTrend").textContent.startsWith("+"), `${canvas.dataset.productionRateWood} average · ${canvas.dataset.currentRateWood} now · ${doc.getElementById("woodTrend").textContent}`);
+      check("villagers use the faster walking pace", canvas.dataset.villagerSpeedMultiplier === "1.65", canvas.dataset.villagerSpeedMultiplier);
+      check("every resident receives a home", canvas.dataset.homedVillagers === "14", canvas.dataset.homedVillagers);
+      check("every resident enters a house at night", canvas.dataset.nightHomeTargets === "14" && canvas.dataset.villagersIndoors === "14" && canvas.dataset.villagersOutdoors === "0" && canvas.dataset.villagersOnBuildingPaths === "0", `${canvas.dataset.villagersIndoors} indoors · ${canvas.dataset.villagersOutdoors} outdoors · ${canvas.dataset.villagersOnBuildingPaths} left on paths`);
+      check("villagers never walk in forest or central icons", canvas.dataset.villagersInForest === "0" && canvas.dataset.villagersOnIcons === "0", `${canvas.dataset.villagersInForest} forest · ${canvas.dataset.villagersOnIcons} icons`);
+
+      win.__wildrootTest.step(16000);
+      check("staffed logging resumes at 07:00 and keeps its 10x zone speed", canvas.dataset.staffedProductionActive === "true" && canvas.dataset.inRangeLoggingMultiplier === "10" && Number(canvas.dataset.loggedTrees) >= 1, `${canvas.dataset.staffedProductionActive} · ${canvas.dataset.inRangeLoggingMultiplier}x · ${canvas.dataset.loggedTrees} stumps`);
+      check("residents emerge for the day shift", canvas.dataset.villagersIndoors === "0" && canvas.dataset.villagersOutdoors === canvas.dataset.villagers, `${canvas.dataset.villagersOutdoors} / ${canvas.dataset.villagers} outdoors`);
+
+      let tree = null;
+      for (let y = 39; y <= 60 && !tree; y++) {
+        for (let x = 63; x <= 65 && !tree; x++) {
+          moveToWorld(win, canvas, x + .5, y + .5);
+          if (doc.getElementById("tileTooltip").textContent.includes("Old-growth tree")) tree = { x, y };
+        }
+      }
+      check("found a standing tree beyond the camp circle", Boolean(tree), tree ? `${tree.x + 1},${tree.y + 1}` : "none visible");
+      if (tree) {
+        await holdWorld(win, canvas, tree.x + .5, tree.y + .5);
+        check("long hold marks tree priority", canvas.dataset.priorityTrees === "1" && canvas.dataset.treesPrioritized === "1", `${canvas.dataset.priorityTrees} marked · ${canvas.dataset.treesPrioritized} total`);
+        check("outside-circle priority uses regular pace", canvas.dataset.activeLoggingMultiplier === "1", `${canvas.dataset.activeLoggingMultiplier}x`);
+        check("marked tree overrides the existing stump queue", canvas.dataset.priorityTreesOverrideStumps === "1" && canvas.dataset.stumpPriorityCamps === "0" && canvas.dataset.activeLoggingFellers === "2", `${canvas.dataset.priorityTreesOverrideStumps} override · ${canvas.dataset.activeLoggingFellers} fellers`);
+        const savedPriority = JSON.parse(win.localStorage.getItem("wildroot-village-save-v1") || "{}");
+        check("priority target saves", Object.keys(savedPriority.priorityTrees || {}).length === 1, JSON.stringify(savedPriority.priorityTrees || {}));
+        await holdWorld(win, canvas, tree.x + .5, tree.y + .5);
+        const savedUnprioritized = JSON.parse(win.localStorage.getItem("wildroot-village-save-v1") || "{}");
+        check("holding a marked tree removes its priority", canvas.dataset.priorityTrees === "0" && canvas.dataset.treesUnprioritized === "1" && Object.keys(savedUnprioritized.priorityTrees || {}).length === 0, `${canvas.dataset.priorityTrees} marked · ${canvas.dataset.treesUnprioritized} removed`);
+        await holdWorld(win, canvas, tree.x + .5, tree.y + .5);
+        check("the same standing tree can be prioritized again", canvas.dataset.priorityTrees === "1" && canvas.dataset.treesPrioritized === "2", `${canvas.dataset.priorityTrees} marked · ${canvas.dataset.treesPrioritized} total marks`);
+
+        win.__wildrootTest.step(14000);
+        moveToWorld(win, canvas, tree.x + .5, tree.y + .5);
+        check("remote priority tree becomes a priority stump", canvas.dataset.priorityTrees === "0" && canvas.dataset.priorityTreesFelled === "1" && canvas.dataset.priorityStumps === "1" && doc.getElementById("tileTooltip").textContent.includes("High-priority stump"), `${canvas.dataset.priorityTreesFelled} felled · ${canvas.dataset.priorityStumps} priority stumps`);
+        check("priority stump remains assigned to its remote camp", canvas.dataset.remoteLoggingStumps === "1", canvas.dataset.remoteLoggingStumps);
+        const remoteStumpWork = win.__wildrootTest.loggingWork(3, true);
+        check("remote stump uses the same regular speed as its tree", Math.abs(remoteStumpWork.stumpRate - remoteStumpWork.stumpFellingRate) < .0001, `${remoteStumpWork.stumpFellingRate.toFixed(3)} tree · ${remoteStumpWork.stumpRate.toFixed(3)} stump`);
+
+        win.__wildrootTest.step(14000);
+        check("priority stump is removed before the ordinary stump", canvas.dataset.priorityStumps === "0" && canvas.dataset.priorityStumpsRemoved === "1" && canvas.dataset.remoteLoggingStumps === "0" && canvas.dataset.loggedTrees === "1", `${canvas.dataset.priorityStumpsRemoved} priority removed · ${canvas.dataset.loggedTrees} ordinary waiting`);
+
+        check("residents remain on the daytime shift after overnight-paused work", canvas.dataset.villagersIndoors === "0" && canvas.dataset.villagersOutdoors === canvas.dataset.villagers, `${canvas.dataset.villagersIndoors} indoors · ${canvas.dataset.villagersOutdoors} / ${canvas.dataset.villagers} outdoors`);
+      }
+    } catch (error) {
+      checks.push({ name: "uncaught test error", pass: false, detail: String(error?.stack || error) });
+    }
+    const passed = checks.every(item => item.pass);
+    result.textContent = `${passed ? "PASS" : "FAIL"}\n` + checks.map(item => `${item.pass ? "✓" : "✗"} ${item.name}${item.detail ? ` — ${item.detail}` : ""}`).join("\n");
+    document.title = passed ? "PASS" : "FAIL";
+  }, { once: true });
+  frame.src = "../index.html?test=logging-priority-movement";
+</script>

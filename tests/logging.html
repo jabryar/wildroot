@@ -1,0 +1,131 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Wildroot stump clearing test</title>
+<style>body{font-family:monospace} iframe{width:1400px;height:1000px;border:0}</style>
+<pre id="result">RUNNING</pre>
+<iframe id="game" style="width:1400px;height:1000px;border:0"></iframe>
+<script>
+  localStorage.setItem("wildroot-village-save-v1", JSON.stringify({
+    version: 2,
+    villageName: "Stumpfield",
+    difficulty: "balanced",
+    day: 18,
+    dayProgress: 0,
+    speed: 1,
+    paused: true,
+    weather: "mild",
+    weatherFrom: "mild",
+    weatherBlend: 1,
+    nextWeatherChange: 19.8,
+    nextEventDay: 100,
+    population: 10,
+    demographics: { children: 0, adults: 10, elders: 0 },
+    resources: { food: 180, water: 180, wood: 50, stone: 50 },
+    terrainSeed: 12873465,
+    buildings: [
+      { type: "hearth", x: 49, y: 49, rotation: 0, builtDay: 1, id: 1 },
+      { type: "lumber", x: 40, y: 48, rotation: 0, builtDay: 4, id: 2, loggingProgress: 0, stumpProgress: 0 }
+    ],
+    nextBuildingId: 3,
+    loggedTrees: { "4835": 17 },
+    clearedTiles: {},
+    camera: { x: 50, y: 50, zoom: .85 }
+  }));
+
+  const frame = document.getElementById("game");
+  const result = document.getElementById("result");
+  const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const pointOptions = (canvas, worldX, worldY) => {
+    const rect = canvas.getBoundingClientRect();
+    const scale = 28 * .85;
+    return {
+      bubbles: true, pointerId: 31, pointerType: "mouse", button: 0, buttons: 1,
+      clientX: rect.left + ((384 + (worldX - 50) * scale) / 768) * rect.width,
+      clientY: rect.top + ((384 + (worldY - 50) * scale) / 768) * rect.height
+    };
+  };
+  const moveToWorld = (win, canvas, worldX, worldY) => {
+    const options = pointOptions(canvas, worldX, worldY);
+    canvas.dispatchEvent(new win.PointerEvent("pointermove", { ...options, buttons: 0 }));
+    return options;
+  };
+  const clickWorld = (win, canvas, worldX, worldY) => {
+    const options = pointOptions(canvas, worldX, worldY);
+    canvas.dispatchEvent(new win.PointerEvent("pointermove", options));
+    canvas.dispatchEvent(new win.PointerEvent("pointerdown", options));
+    canvas.dispatchEvent(new win.PointerEvent("pointerup", { ...options, buttons: 0 }));
+  };
+
+  frame.addEventListener("load", async () => {
+    const win = frame.contentWindow;
+    const doc = frame.contentDocument;
+    const checks = [];
+    const check = (name, pass, detail = "") => checks.push({ name, pass: Boolean(pass), detail });
+    try {
+      await wait(250);
+      doc.getElementById("continueGameButton").click();
+      const canvas = doc.getElementById("gameCanvas");
+      const wildYields = Array.from({ length: 400 }, (_, index) => win.__wildrootTest.wildTreeTimberYield(index % 100, Math.floor(index / 100), 913472));
+      const managedYields = Array.from({ length: 160 }, (_, index) => win.__wildrootTest.managedTreeTimberYield(Math.floor(index / 16) + 1, index % 16, 913472));
+      check("every wild and managed tree has an integer 5-10 timber yield", [...wildYields, ...managedYields].every(value => Number.isInteger(value) && value >= 5 && value <= 10), `${Math.min(...wildYields, ...managedYields)}-${Math.max(...wildYields, ...managedYields)}`);
+      check("tree yields use the full 5-10 range", Math.min(...wildYields, ...managedYields) === 5 && Math.max(...wildYields, ...managedYields) === 10, `${Math.min(...wildYields, ...managedYields)}-${Math.max(...wildYields, ...managedYields)}`);
+      check("outside-zone trees use a five-hour full-crew base pace", Number(canvas.dataset.treeFellingBaseRate) === 2.4 && canvas.dataset.outsideTreeFellingBaseHours === "5" && canvas.dataset.insideTreeFellingBaseHours === "0.5" && canvas.dataset.standardLoggingCrew === "2", `${canvas.dataset.treeFellingBaseRate}/worker-day · ${canvas.dataset.outsideTreeFellingBaseHours}h outside · ${canvas.dataset.insideTreeFellingBaseHours}h inside`);
+      const initialLoggingWork = win.__wildrootTest.loggingWork(2, true);
+      check("stumps break at exactly the same speed as trees", initialLoggingWork?.timberRate > 0 && Math.abs(initialLoggingWork.stumpRate - initialLoggingWork.stumpFellingRate) < .0001, `${initialLoggingWork?.stumpFellingRate?.toFixed(3)} tree · ${initialLoggingWork?.stumpRate?.toFixed(3)} stump`);
+      const cursor = moveToWorld(win, canvas, 35.5, 48.5);
+      const tooltip = doc.getElementById("tileTooltip");
+      const tooltipRect = tooltip.getBoundingClientRect();
+      const verticalGap = Math.min(Math.abs(tooltipRect.top - cursor.clientY), Math.abs(cursor.clientY - tooltipRect.bottom));
+      check("felled tree leaves a stump", canvas.dataset.loggedTrees === "1" && doc.getElementById("tileTooltip").textContent.includes("Logging stump"), `${canvas.dataset.loggedTrees} · ${doc.getElementById("tileTooltip").textContent}`);
+      check("description sits 20px above or below cursor", Math.abs(verticalGap - 20) <= 2, `${verticalGap.toFixed(1)}px`);
+      doc.getElementById("descriptionToggle").click();
+      moveToWorld(win, canvas, 35.5, 48.5);
+      check("descriptions can be turned off and save", tooltip.hidden && canvas.dataset.descriptionsEnabled === "false" && JSON.parse(win.localStorage.getItem("wildroot-village-save-v1") || "{}").descriptionsEnabled === false, `${tooltip.hidden} · ${canvas.dataset.descriptionsEnabled}`);
+      doc.getElementById("descriptionToggle").click();
+      moveToWorld(win, canvas, 35.5, 48.5);
+      check("descriptions can be turned back on", !tooltip.hidden && doc.getElementById("descriptionToggle").getAttribute("aria-pressed") === "true", doc.getElementById("descriptionToggle").textContent);
+      check("stump is inside worker range", canvas.dataset.loggingStumpsInRange === "1", canvas.dataset.loggingStumpsInRange);
+      check("stump work has priority over felling", canvas.dataset.stumpPriorityCamps === "1" && canvas.dataset.activeLoggingFellers === "0", `${canvas.dataset.stumpPriorityCamps} priority camps · ${canvas.dataset.activeLoggingFellers} fellers`);
+
+      doc.querySelector('[data-speed="3"]').click();
+      win.__wildrootTest.step(800);
+      check("loggers do not chop while a stump is being removed", canvas.dataset.loggedTrees === "1" && canvas.dataset.stumpsRemoved === "0", `${canvas.dataset.loggedTrees} stumps · ${canvas.dataset.stumpsRemoved} removed`);
+      win.__wildrootTest.step(600);
+      check("workers remove the oldest stump before resuming chopping", canvas.dataset.stumpsRemoved === "1", `${canvas.dataset.loggedTrees} new stumps · ${canvas.dataset.stumpsRemoved} removed`);
+      check("stump becomes clearing", canvas.dataset.clearedForestTiles === "1", canvas.dataset.clearedForestTiles);
+      win.__wildrootTest.step(1300);
+      check("local tree felling remains 10x after stump work", canvas.dataset.inRangeLoggingMultiplier === "10" && Number(canvas.dataset.loggedTrees) >= 1, `${canvas.dataset.inRangeLoggingMultiplier}x · ${canvas.dataset.loggedTrees} stumps`);
+
+      doc.querySelector('[data-building="well"]').click();
+      clickWorld(win, canvas, 35.5, 48.5);
+      check("new clearing tile is buildable", canvas.dataset.buildingCount === "3", `${canvas.dataset.buildingCount} buildings`);
+      const saved = JSON.parse(win.localStorage.getItem("wildroot-village-save-v1") || "{}");
+      check("clearing persists in save", Boolean(saved.clearedTiles?.[4835]), JSON.stringify(saved.clearedTiles || {}));
+      check("stump grants exactly one bonus timber", saved.stats?.stumpsRemoved === 1, `${saved.stats?.stumpsRemoved || 0} timber bonuses recorded`);
+      check("felled tree stores its exact 5-10 timber yield", saved.stats?.treeTimberYielded >= 5 && saved.stats?.treeTimberYielded <= 10 && saved.stats?.lastTreeTimberYield === saved.stats?.treeTimberYielded, `${saved.stats?.lastTreeTimberYield || 0} last · ${saved.stats?.treeTimberYielded || 0} total`);
+
+      const yieldedBeforeFullStorage = Number(canvas.dataset.treeTimberYielded);
+      const storedBeforeFullStorage = Number(canvas.dataset.treeTimberStored);
+      const stumpsBeforeFullStorage = Number(canvas.dataset.stumpsRemoved);
+      win.__wildrootTest.fillTimberStorage();
+      check("full timber storage automatically pauses Logging Camps", canvas.dataset.timberStorageFull === "true" && canvas.dataset.storageBlockedLoggingCamps === "1" && win.__wildrootTest.loggingWork(2, true).timberRate === 0, `${canvas.dataset.storageBlockedLoggingCamps} blocked · ${canvas.dataset.projectedLoggingTimberRate}/day`);
+      win.__wildrootTest.step(5000);
+      check("a storage-paused camp cuts neither trees nor stumps", Number(canvas.dataset.treeTimberYielded) === yieldedBeforeFullStorage && Number(canvas.dataset.stumpsRemoved) === stumpsBeforeFullStorage, `${canvas.dataset.treeTimberYielded} tree timber · ${canvas.dataset.stumpsRemoved} stumps`);
+
+      check("Logging Camp inspection opens", win.__wildrootTest.openBuilding(2), "camp 2");
+      const storageOverride = doc.getElementById("loggingStorageOverride");
+      check("inspection offers a manual full-storage override", Boolean(storageOverride) && storageOverride.getAttribute("aria-pressed") === "false", storageOverride?.textContent || "missing");
+      storageOverride?.click();
+      check("manual override is enabled and saved", canvas.dataset.storageBlockedLoggingCamps === "0" && canvas.dataset.loggingFullStorageOverrides === "1" && JSON.parse(win.localStorage.getItem("wildroot-village-save-v1") || "{}").buildings?.find(building => building.id === 2)?.workWhenStorageFull === true, `${canvas.dataset.storageBlockedLoggingCamps} blocked · ${canvas.dataset.loggingFullStorageOverrides} override`);
+      doc.querySelector(".sheet-close")?.click();
+      win.__wildrootTest.step(6000);
+      check("override permits clearing but discards excess timber", Number(canvas.dataset.treeTimberYielded) > yieldedBeforeFullStorage && Number(canvas.dataset.treeTimberStored) - storedBeforeFullStorage < 1, `${canvas.dataset.treeTimberYielded} yielded · ${canvas.dataset.treeTimberStored} stored`);
+    } catch (error) {
+      checks.push({ name: "uncaught test error", pass: false, detail: String(error?.stack || error) });
+    }
+    const passed = checks.every(item => item.pass);
+    result.textContent = `${passed ? "PASS" : "FAIL"}\n` + checks.map(item => `${item.pass ? "✓" : "✗"} ${item.name}${item.detail ? ` — ${item.detail}` : ""}`).join("\n");
+    document.title = passed ? "PASS" : "FAIL";
+  }, { once: true });
+  frame.src = "../index.html?test=logging";
+</script>

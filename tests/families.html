@@ -1,0 +1,76 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Wildroot families test</title>
+<style>body{font-family:monospace} iframe{width:1400px;height:1000px;border:0}</style>
+<pre id="result">RUNNING</pre>
+<iframe id="game" style="width:1400px;height:1000px;border:0"></iframe>
+<script>
+  localStorage.setItem("wildroot-village-achievements-v1", "{}");
+  localStorage.setItem("wildroot-village-save-v1", JSON.stringify({
+    version: 2,
+    villageName: "Learning Grove",
+    difficulty: "balanced",
+    day: 20,
+    dayProgress: .15,
+    speed: 1,
+    paused: true,
+    weather: "mild",
+    population: 20,
+    demographics: { children: 5, adults: 13, elders: 2 },
+    education: 71,
+    buildings: [
+      { type: "hearth", x: 49, y: 49, rotation: 0, builtDay: 1, id: 1 },
+      { type: "school", x: 45, y: 45, rotation: 1, builtDay: 18, id: 2 },
+      { type: "playground", x: 54, y: 45, rotation: 0, builtDay: 19, id: 3 },
+      { type: "cottage", x: 44, y: 51, rotation: 0, builtDay: 4, id: 4 },
+      { type: "cottage", x: 55, y: 51, rotation: 0, builtDay: 8, id: 5 }
+    ],
+    nextBuildingId: 6,
+    camera: { x: 50, y: 50, zoom: .85 }
+  }));
+
+  const frame = document.getElementById("game");
+  const result = document.getElementById("result");
+  const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const clickTile = (win, canvas, x, y) => {
+    const rect = canvas.getBoundingClientRect();
+    const scale = 28 * .85;
+    const options = {
+      bubbles: true, pointerId: 12, pointerType: "mouse", button: 0, buttons: 1,
+      clientX: rect.left + ((384 + (x + .5 - 50) * scale) / 768) * rect.width,
+      clientY: rect.top + ((384 + (y + .5 - 50) * scale) / 768) * rect.height
+    };
+    canvas.dispatchEvent(new win.PointerEvent("pointerdown", options));
+    canvas.dispatchEvent(new win.PointerEvent("pointerup", { ...options, buttons: 0 }));
+  };
+
+  frame.addEventListener("load", async () => {
+    const win = frame.contentWindow;
+    const doc = frame.contentDocument;
+    const checks = [];
+    const check = (name, pass, detail = "") => checks.push({ name, pass: Boolean(pass), detail });
+    try {
+      await wait(250);
+      check("family save offered", !doc.getElementById("continueGameButton").hidden);
+      doc.getElementById("continueGameButton").click();
+      await wait(650);
+      check("demographics preserved", doc.getElementById("familiesLabel").textContent.includes("5 children"), doc.getElementById("familiesLabel").textContent);
+      check("school capacity active", doc.getElementById("familiesLabel").textContent.includes("School 5/16"), doc.getElementById("familiesLabel").textContent);
+      check("twenty villagers rendered", doc.getElementById("gameCanvas").dataset.villagers === "20", doc.getElementById("gameCanvas").dataset.villagers);
+      check("education preserved", doc.getElementById("familiesLabel").textContent.includes("Education 71"), doc.getElementById("familiesLabel").textContent);
+
+      doc.getElementById("inspectTool").click();
+      clickTile(win, doc.getElementById("gameCanvas"), 46, 46);
+      await wait(100);
+      const inspection = doc.querySelector(".inspection-grid")?.textContent || "";
+      check("school reports places", inspection.includes("16 places"), inspection);
+      check("saved rotation preserved", inspection.includes("2 × 3 tiles · East"), inspection);
+    } catch (error) {
+      checks.push({ name: "uncaught test error", pass: false, detail: String(error?.stack || error) });
+    }
+    const passed = checks.every(item => item.pass);
+    result.textContent = `${passed ? "PASS" : "FAIL"}\n` + checks.map(item => `${item.pass ? "✓" : "✗"} ${item.name}${item.detail ? ` — ${item.detail}` : ""}`).join("\n");
+    document.title = passed ? "PASS" : "FAIL";
+  }, { once: true });
+  frame.src = "../index.html";
+</script>

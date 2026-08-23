@@ -1,0 +1,91 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Wildroot scenario test</title>
+<style>body{font-family:monospace} iframe{width:1400px;height:1000px;border:0}</style>
+<pre id="result">RUNNING</pre>
+<iframe id="game"></iframe>
+<script>
+  const result = document.getElementById("result");
+  const frame = document.getElementById("game");
+  localStorage.clear();
+  const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const expected = {
+    winter_watch: { name: "Winter Watch", people: 18 },
+    dry_river: { name: "The Dry River", people: 22 },
+    timber_debt: { name: "Timber Debt", people: 28 },
+    smoke_valley: { name: "Smoke Valley", people: 42 },
+    burned_watershed: { name: "After the Fire", people: 22, restoration: true },
+    poisoned_river: { name: "The Poisoned River", people: 34, restoration: true },
+    silent_fields: { name: "The Silent Fields", people: 26, restoration: true },
+    green_city: { name: "The Green City", people: 68 }
+  };
+
+  frame.addEventListener("load", async () => {
+    const win = frame.contentWindow;
+    const doc = frame.contentDocument;
+    const checks = [];
+    const check = (name, pass, detail = "") => checks.push({ name, pass: Boolean(pass), detail });
+    try {
+      doc.getElementById("scenarioModeButton").click();
+      check("eight scenario cards", doc.querySelectorAll("#scenarioList [data-scenario]").length === 8, doc.querySelectorAll("#scenarioList [data-scenario]").length);
+      check("three urgent restoration scenarios are labelled", doc.querySelectorAll(".restoration-scenario-tag").length === 3, doc.querySelectorAll(".restoration-scenario-tag").length);
+
+      for (const [id, data] of Object.entries(expected)) {
+        const option = doc.querySelector(`[data-scenario="${id}"]`);
+        check(`${data.name} listed`, Boolean(option), option?.textContent || "missing");
+        option.click();
+        await wait(120);
+        const canvas = doc.getElementById("gameCanvas");
+        check(`${data.name} briefing`, doc.getElementById("scenarioTitle")?.textContent === data.name, doc.getElementById("scenarioTitle")?.textContent || "missing");
+        check(`${data.name} existing village`, canvas.dataset.scenario === id && Number(canvas.dataset.buildingCount) >= 8, `${canvas.dataset.scenario} · ${canvas.dataset.buildingCount} buildings`);
+        check(`${data.name} population`, doc.getElementById("populationValue").textContent.startsWith(String(data.people)), doc.getElementById("populationValue").textContent);
+        check(`${data.name} four goals`, doc.querySelectorAll(".scenario-goal").length === 4, doc.querySelectorAll(".scenario-goal").length);
+        check(`${data.name} includes an educational focus`, (doc.querySelector("[data-scenario-learning]")?.textContent || "").includes("Learning focus") && (doc.querySelector("[data-scenario-learning]")?.textContent || "").length > 70, doc.querySelector("[data-scenario-learning]")?.textContent || "missing");
+        check(`${data.name} shows the universal collapse rule`, (doc.querySelector(".scenario-briefing")?.textContent || "").includes("below 5% overall") && (doc.querySelector(".scenario-briefing")?.textContent || "").includes("indicator reaches 0%"));
+        if (id === "burned_watershed") {
+          check("After the Fire creates permanent black leafless trees", Number(canvas.dataset.burnedTreeCount) > 0 && canvas.dataset.burnedTreeLeafState === "permanent-leafless" && canvas.dataset.burnedTreeColour === "black", `${canvas.dataset.burnedTreeCount} trees · ${canvas.dataset.burnedTreeLeafState} · ${canvas.dataset.burnedTreeColour}`);
+          let burnedTree = null;
+          for (let y = 0; y < 100 && !burnedTree; y++) {
+            for (let x = 0; x < 100; x++) {
+              const info = win.__wildrootTest.burnedTreeInfo(x, y);
+              if (info.standing && info.burned) { burnedTree = info; break; }
+            }
+          }
+          const expectedYield = burnedTree ? Math.round(burnedTree.baseYield * 0.7 * 10) / 10 : null;
+          check("burned trees keep the winter silhouette in every season", burnedTree?.leafAmount === 0 && burnedTree?.evergreen === false && burnedTree?.trunkColour === "#111111", JSON.stringify(burnedTree));
+          check("burned trees contain exactly 30% less timber", burnedTree?.timberMultiplier === 0.7 && burnedTree?.timberYield === expectedYield && canvas.dataset.burnedTreeTimberReductionPercent === "30", JSON.stringify(burnedTree));
+        }
+        if (data.restoration) {
+          const forecast = Number(canvas.dataset.ecosystemDailyForecast);
+          check(`${data.name} starts below 40%`, canvas.dataset.restorationScenario === "true" && Number(canvas.dataset.scenarioStartingEcosystem) < 40, canvas.dataset.scenarioStartingEcosystem);
+          const crisisText = doc.querySelector("[data-restoration-crisis]")?.textContent || "";
+          check(`${data.name} starts at a displayed -1.0 ecosystem per day`, forecast >= -1.05 && forecast < -0.95 && crisisText.includes("Active decline") && crisisText.includes("-1.0 ecosystem/day"), `${forecast.toFixed(3)} · ${crisisText || "missing"}`);
+          check(`${data.name} explains how to stop its crisis`, (doc.querySelector(".scenario-briefing")?.textContent || "").includes("Stop the crisis"));
+        }
+        if (id !== "green_city") {
+          doc.getElementById("scenarioBackButton").click();
+          await wait(80);
+          doc.getElementById("scenarioModeButton").click();
+        }
+      }
+
+      doc.getElementById("scenarioBeginButton").click();
+      await wait(420);
+      check("scenario begins running", !doc.getElementById("pauseButton").textContent.includes("▶") && !doc.querySelector(".scenario-briefing"));
+      check("scenario goals on planning desk", doc.querySelector(".objective-card h3").textContent === "The Green City" && doc.querySelectorAll("#objectiveList .objective-item").length === 4, doc.querySelector(".objective-card")?.textContent || "missing");
+      check("scenario saved", JSON.parse(win.localStorage.getItem("wildroot-village-save-v1") || "{}").scenarioId === "green_city");
+      const allBelow = { forest: 4.99, wildlife: 4.99, water: 4.99, soil: 4.99, air: 4.99, biodiversity: 4.99 };
+      const oneFailed = { forest: 100, wildlife: 100, water: 0, soil: 100, air: 100, biodiversity: 100 };
+      const boundary = { forest: 5, wildlife: 5, water: 5, soil: 5, air: 5, biodiversity: 5 };
+      check("overall ecosystem below 5% causes collapse", win.__wildrootTest.ecosystemCollapse(allBelow)?.type === "overall");
+      check("any single zero indicator causes collapse", win.__wildrootTest.ecosystemCollapse(oneFailed)?.type === "indicator" && win.__wildrootTest.ecosystemCollapse(oneFailed)?.metric === "water");
+      check("exactly 5% overall remains above the collapse line", win.__wildrootTest.ecosystemCollapse(boundary) === null);
+    } catch (error) {
+      checks.push({ name: "uncaught test error", pass: false, detail: String(error?.stack || error) });
+    }
+    const passed = checks.every(item => item.pass);
+    result.textContent = `${passed ? "PASS" : "FAIL"}\n` + checks.map(item => `${item.pass ? "✓" : "✗"} ${item.name}${item.detail ? ` — ${item.detail}` : ""}`).join("\n");
+    document.title = passed ? "PASS" : "FAIL";
+  }, { once: true });
+  frame.src = "../index.html?test=scenarios";
+</script>

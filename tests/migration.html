@@ -1,0 +1,54 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Wildroot migration test</title>
+<pre id="result">RUNNING</pre>
+<iframe id="game" style="width:1400px;height:1000px;border:0"></iframe>
+<script>
+  const tiles = Array(900).fill(null);
+  tiles[15 * 30 + 15] = { type: "hearth", builtDay: 1, id: 1 };
+  tiles[15 * 30 + 16] = { type: "cottage", builtDay: 2, id: 2 };
+  localStorage.setItem("wildroot-village-save-v1", JSON.stringify({
+    version: 1,
+    villageName: "Legacy Grove",
+    difficulty: "balanced",
+    day: 7,
+    dayProgress: .25,
+    speed: 2,
+    weather: "rain",
+    population: 9,
+    health: 90,
+    happiness: 80,
+    resources: { food: 140, water: 150, wood: 50, stone: 40 },
+    ecosystem: { forest: 88, wildlife: 84, water: 89, soil: 87, air: 95, biodiversity: 86 },
+    tiles,
+    logs: [],
+    completedObjectives: [],
+    buffs: {}
+  }));
+
+  const frame = document.getElementById("game");
+  const result = document.getElementById("result");
+  frame.addEventListener("load", () => {
+    const doc = frame.contentDocument;
+    setTimeout(() => {
+      const checks = [];
+      const check = (name, pass, detail = "") => checks.push({ name, pass, detail });
+      try {
+        check("legacy continue offered", !doc.getElementById("continueGameButton").hidden);
+        doc.getElementById("continueGameButton").click();
+        setTimeout(() => {
+          check("day preserved", doc.getElementById("dayLabel").textContent.includes("Day 7"), doc.getElementById("dayLabel").textContent);
+          check("cottage migrated", doc.getElementById("populationValue").textContent.includes("/ 18"), doc.getElementById("populationValue").textContent);
+          check("new world active", doc.getElementById("coordinatesLabel").textContent.includes("100 × 100"));
+          const passed = checks.every(item => item.pass);
+          result.textContent = `${passed ? "PASS" : "FAIL"}\n` + checks.map(item => `${item.pass ? "✓" : "✗"} ${item.name}${item.detail ? ` — ${item.detail}` : ""}`).join("\n");
+          document.title = passed ? "PASS" : "FAIL";
+        }, 500);
+      } catch (error) {
+        result.textContent = `FAIL\n${error.stack || error}`;
+        document.title = "FAIL";
+      }
+    }, 300);
+  }, { once: true });
+  frame.src = "../index.html";
+</script>

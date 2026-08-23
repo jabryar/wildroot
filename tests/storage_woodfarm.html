@@ -1,0 +1,111 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Wildroot storage and managed timber test</title>
+<style>body{font-family:monospace} iframe{width:1400px;height:1000px;border:0}</style>
+<pre id="result">RUNNING</pre>
+<iframe id="game" style="width:1400px;height:1000px;border:0"></iframe>
+<script>
+  const clearedTiles = {};
+  const campCentre = { x: 39.5, y: 49 };
+  for (let y = 40; y <= 58; y++) {
+    for (let x = 30; x <= 49; x++) {
+      const dx = x + .5 - campCentre.x;
+      const dy = y + .5 - campCentre.y;
+      if (dx * dx + dy * dy <= 7.5 * 7.5) clearedTiles[y * 100 + x] = 9;
+    }
+  }
+
+  localStorage.setItem("wildroot-village-save-v1", JSON.stringify({
+    version: 2,
+    villageName: "Managed Grove",
+    difficulty: "balanced",
+    day: 10,
+    dayProgress: 0,
+    speed: 1,
+    paused: true,
+    weather: "mild",
+    weatherFrom: "mild",
+    weatherBlend: 1,
+    nextWeatherChange: 99,
+    nextEventDay: 100,
+    population: 12,
+    demographics: { children: 0, adults: 12, elders: 0 },
+    resources: { food: 450, water: 180, wood: 100, stone: 100 },
+    terrainSeed: 12873465,
+    buildings: [
+      { type: "hearth", x: 49, y: 49, rotation: 0, builtDay: 1, id: 1 },
+      { type: "lumber", x: 38, y: 48, rotation: 0, builtDay: 4, id: 2, loggingProgress: 0, stumpProgress: 0 },
+      { type: "wood_farm", x: 44, y: 47, rotation: 0, builtDay: 5, id: 3, woodFarmPlots: Array(16).fill(5.1) }
+    ],
+    nextBuildingId: 4,
+    loggedTrees: {},
+    clearedTiles,
+    camera: { x: 50, y: 50, zoom: .85 }
+  }));
+
+  const frame = document.getElementById("game");
+  const result = document.getElementById("result");
+  const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const clickWorld = (win, canvas, worldX, worldY) => {
+    const rect = canvas.getBoundingClientRect();
+    const scale = 28 * .85;
+    const options = {
+      bubbles: true, pointerId: 51, pointerType: "mouse", button: 0, buttons: 1,
+      clientX: rect.left + ((384 + (worldX - 50) * scale) / 768) * rect.width,
+      clientY: rect.top + ((384 + (worldY - 50) * scale) / 768) * rect.height
+    };
+    canvas.dispatchEvent(new win.PointerEvent("pointermove", options));
+    canvas.dispatchEvent(new win.PointerEvent("pointerdown", options));
+    canvas.dispatchEvent(new win.PointerEvent("pointerup", { ...options, buttons: 0 }));
+  };
+
+  frame.addEventListener("load", async () => {
+    const win = frame.contentWindow;
+    const doc = frame.contentDocument;
+    const checks = [];
+    const check = (name, pass, detail = "") => checks.push({ name, pass: Boolean(pass), detail });
+    try {
+      await wait(250);
+      doc.getElementById("continueGameButton").click();
+      await wait(500);
+      const canvas = doc.getElementById("gameCanvas");
+
+      check("Storehouse is a 2x2 building", doc.querySelector('[data-building="storage"] .size-chip')?.textContent === "2×2", doc.querySelector('[data-building="storage"] .size-chip')?.textContent || "missing");
+      check("Wood Farm is a 4x4 building", doc.querySelector('[data-building="wood_farm"] .size-chip')?.textContent === "4×4", doc.querySelector('[data-building="wood_farm"] .size-chip')?.textContent || "missing");
+      check("Hearth stores 400 of each resource", canvas.dataset.storageCapacityWood === "400" && doc.getElementById("foodValue").textContent === "400/400", `${canvas.dataset.storageCapacityWood} · ${doc.getElementById("foodValue").textContent}`);
+      check("excess resources clamp to Hearth capacity", doc.getElementById("foodValue").textContent.startsWith("400/"), doc.getElementById("foodValue").textContent);
+
+      doc.querySelector('[data-building="storage"]').click();
+      clickWorld(win, canvas, 45.5, 53.5);
+      await wait(450);
+      check("Storehouse adds 200 capacity to every resource", ["Food", "Water", "Wood", "Stone"].every(resource => canvas.dataset[`storageCapacity${resource}`] === "600"), `${canvas.dataset.storageCapacityFood}/${canvas.dataset.storageCapacityWater}/${canvas.dataset.storageCapacityWood}/${canvas.dataset.storageCapacityStone}`);
+
+      check("Wood Farm owns sixteen tracked plots", canvas.dataset.woodFarmPlots === "16", canvas.dataset.woodFarmPlots);
+      const renewableBeforeWild = win.__wildrootTest.loggingTargetOrder(false, true, true);
+      const priorityBeforeRenewable = win.__wildrootTest.loggingTargetOrder(true, true, true);
+      check("mature managed trees are selected before unmarked wild trees", renewableBeforeWild?.kind === "farm" && renewableBeforeWild?.priority === false && canvas.dataset.loggingTargetOrder.includes("mature-managed-tree,unmarked-wild-tree"), `${JSON.stringify(renewableBeforeWild)} · ${canvas.dataset.loggingTargetOrder}`);
+      check("a manually prioritized wild tree still comes first", priorityBeforeRenewable?.kind === "wild" && priorityBeforeRenewable?.priority === true, JSON.stringify(priorityBeforeRenewable));
+      check("camp stops with no wild or mature trees", canvas.dataset.loggingTreesInRange === "0" && canvas.dataset.loggingFarmSupply === "0" && canvas.dataset.loggingStopped === "1", `${canvas.dataset.loggingTreesInRange} wild · ${canvas.dataset.loggingFarmSupply} farm · ${canvas.dataset.loggingStopped} stopped`);
+      check("stopped camp has no positive timber output", !doc.getElementById("woodTrend").textContent.startsWith("+"), doc.getElementById("woodTrend").textContent);
+
+      doc.querySelector('[data-speed="3"]').click();
+      win.__wildrootTest.step(12000);
+      check("all sixteen plots reach maturity and begin harvesting after five days", Number(canvas.dataset.matureWoodFarmTrees) + Number(canvas.dataset.woodFarmTreesHarvested) === 16, `${canvas.dataset.matureWoodFarmTrees} mature · ${canvas.dataset.woodFarmTreesHarvested} harvested`);
+      check("nearby mature grove restarts camp", Number(canvas.dataset.loggingFarmSupply) > 0 && canvas.dataset.loggingManagedTargets === "1" && canvas.dataset.loggingStopped === "0" && doc.getElementById("woodTrend").textContent.startsWith("+"), `${canvas.dataset.loggingFarmSupply} ready · ${canvas.dataset.loggingManagedTargets} managed target · ${doc.getElementById("woodTrend").textContent}`);
+
+      win.__wildrootTest.step(50000);
+      const harvested = Number(canvas.dataset.woodFarmTreesHarvested);
+      const mature = Number(canvas.dataset.matureWoodFarmTrees);
+      check("Logging Camp harvests managed plots at 10x", harvested >= 10 && harvested + mature === 16, `${harvested} harvested · ${mature} mature`);
+      const saved = JSON.parse(win.localStorage.getItem("wildroot-village-save-v1") || "{}");
+      const replanted = saved.buildings?.find(building => building.type === "wood_farm")?.woodFarmPlots || [];
+      check("harvested plot receives a new growth timestamp", replanted.some(plantedAt => plantedAt > 10.2), JSON.stringify(replanted));
+    } catch (error) {
+      checks.push({ name: "uncaught test error", pass: false, detail: String(error?.stack || error) });
+    }
+    const passed = checks.every(item => item.pass);
+    result.textContent = `${passed ? "PASS" : "FAIL"}\n` + checks.map(item => `${item.pass ? "✓" : "✗"} ${item.name}${item.detail ? ` — ${item.detail}` : ""}`).join("\n");
+    document.title = passed ? "PASS" : "FAIL";
+  }, { once: true });
+  frame.src = "../index.html?test=storage-woodfarm";
+</script>

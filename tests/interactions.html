@@ -1,0 +1,124 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Wildroot resident and proximity test</title>
+<style>body{font-family:monospace} iframe{width:1400px;height:1000px;border:0}</style>
+<pre id="result">RUNNING</pre>
+<iframe id="game" style="width:1400px;height:1000px;border:0"></iframe>
+<script>
+  localStorage.setItem("wildroot-village-save-v1", JSON.stringify({
+    version: 2,
+    villageName: "Working Wood",
+    difficulty: "balanced",
+    day: 18,
+    dayProgress: .22,
+    speed: 1,
+    paused: true,
+    weather: "mild",
+    population: 18,
+    demographics: { children: 2, adults: 15, elders: 1 },
+    education: 52,
+    terrainSeed: 12873465,
+    buildings: [
+      { type: "hearth", x: 49, y: 49, rotation: 0, builtDay: 1, id: 1 },
+      { type: "lumber", x: 40, y: 48, rotation: 0, builtDay: 4, id: 2, loggingProgress: .25 },
+      { type: "farm", x: 53, y: 48, rotation: 0, builtDay: 5, id: 3 },
+      { type: "workshop", x: 57, y: 48, rotation: 0, builtDay: 16, id: 4 },
+      { type: "cottage", x: 45, y: 54, rotation: 0, builtDay: 3, id: 5 },
+      { type: "cottage", x: 53, y: 54, rotation: 0, builtDay: 8, id: 6 },
+      { type: "windmill", x: 70, y: 70, rotation: 0, builtDay: 17, id: 7 }
+    ],
+    nextBuildingId: 8,
+    people: [{
+      id: 1, name: "Mira Oak", ageGroup: "adult", joinedDay: 1,
+      carryCapacity: 3, carriedItem: "timber", carriedAmount: 2,
+      workBuildingId: 2, schoolBuildingId: null, tripPhase: "deliver"
+    }],
+    nextPersonId: 2,
+    loggedTrees: { "4835": 17 },
+    camera: { x: 50, y: 50, zoom: .85 }
+  }));
+
+  const frame = document.getElementById("game");
+  const result = document.getElementById("result");
+  const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const clickWorld = (win, canvas, worldX, worldY) => {
+    const rect = canvas.getBoundingClientRect();
+    const scale = 28 * .85;
+    const options = {
+      bubbles: true, pointerId: 21, pointerType: "mouse", button: 0, buttons: 1,
+      clientX: rect.left + ((384 + (worldX - 50) * scale) / 768) * rect.width,
+      clientY: rect.top + ((384 + (worldY - 50) * scale) / 768) * rect.height
+    };
+    canvas.dispatchEvent(new win.PointerEvent("pointermove", options));
+    canvas.dispatchEvent(new win.PointerEvent("pointerdown", options));
+    canvas.dispatchEvent(new win.PointerEvent("pointerup", { ...options, buttons: 0 }));
+  };
+
+  frame.addEventListener("load", async () => {
+    const win = frame.contentWindow;
+    const doc = frame.contentDocument;
+    const checks = [];
+    const check = (name, pass, detail = "") => checks.push({ name, pass: Boolean(pass), detail });
+    try {
+      await wait(250);
+      doc.getElementById("continueGameButton").click();
+      await wait(700);
+      const canvas = doc.getElementById("gameCanvas");
+      check("named roster restored", canvas.dataset.namedPeople === "18", canvas.dataset.namedPeople);
+      check("logged tree state restored", canvas.dataset.loggedTrees === "1", canvas.dataset.loggedTrees);
+      check("logging camp reaches trees", Number(canvas.dataset.loggingTreesInRange) > 0, canvas.dataset.loggingTreesInRange);
+      check("workshop reduces nearby farm", canvas.dataset.cropPollutionLoss === "24", canvas.dataset.cropPollutionLoss);
+      check("forest-edge pollution counted", Number(canvas.dataset.forestPollution) > 0, canvas.dataset.forestPollution);
+      const dayNoise = win.__wildrootTest.noiseReport(true);
+      const nightNoise = win.__wildrootTest.noiseReport(false);
+      const dailyNoise = win.__wildrootTest.noiseReport();
+      const dayWellbeing = win.__wildrootTest.wellbeingRates(true);
+      check("loud workplaces expose occupied housing inside five tiles", dailyNoise.sourceCount === 3 && dailyNoise.range === 5 && dailyNoise.exposedHomes >= 2 && dailyNoise.exposedResidents === 18, JSON.stringify(dailyNoise));
+      check("noise harms morale more than health", dailyNoise.moodLoss > dailyNoise.healthLoss && dailyNoise.healthLoss > 0 && Number(canvas.dataset.noiseMoodLossDaily) > Number(canvas.dataset.noiseHealthLossDaily), `${dailyNoise.moodLoss.toFixed(3)} morale · ${dailyNoise.healthLoss.toFixed(3)} health`);
+      check("noise losses are applied to live morale and health rates", Math.abs(dayWellbeing.happiness - (.26 - dayNoise.moodLoss)) < .000001 && Math.abs(dayWellbeing.health - (.45 - dayNoise.healthLoss)) < .000001, `${dayWellbeing.happiness.toFixed(3)} morale/day · ${dayWellbeing.health.toFixed(3)} health/day`);
+      check("staffed noise stops at night while automatic sources remain active", dayNoise.moodLoss > dailyNoise.moodLoss && dailyNoise.moodLoss > 0 && nightNoise.moodLoss === 0 && nightNoise.activeSourceCount === 1 && canvas.dataset.noiseNightMoodLoss === "0.0000", `${dayNoise.activeSourceCount} day sources · ${nightNoise.activeSourceCount} night source · ${dayNoise.moodLoss.toFixed(3)} day loss · ${dailyNoise.moodLoss.toFixed(3)} average`);
+      check("family summary reports residential noise exposure", doc.getElementById("familiesLabel").textContent.includes("18 noise-exposed") && doc.getElementById("familiesLabel").title.includes("full 24-hour average"), doc.getElementById("familiesLabel").textContent);
+
+      const worker = JSON.parse(canvas.dataset.firstWorker);
+      check("worker identity stable", worker.name === "Mira Oak", worker.name);
+      clickWorld(win, canvas, worker.x, worker.y);
+      await wait(120);
+      check("resident opens by clicking person", doc.getElementById("residentTitle")?.textContent === "Mira Oak", doc.getElementById("residentTitle")?.textContent || "no resident modal");
+      const residentText = doc.querySelector(".resident-modal")?.textContent || "";
+      check("resident workplace shown", residentText.includes("Logging Camp") && residentText.includes("Logger"), residentText);
+      check("resident carrying shown", residentText.includes("2 timber") && residentText.includes("3 items"), residentText);
+      doc.querySelector(".sheet-close").click();
+      await wait(80);
+
+      clickWorld(win, canvas, 41.5, 48.5);
+      await wait(100);
+      const loggingInspection = doc.querySelector(".inspection-grid")?.textContent || "";
+      check("logging range and residential noise reported", loggingInspection.includes("Logging zone") && loggingInspection.includes("standing trees") && loggingInspection.includes("Noise pollution") && loggingInspection.includes("village morale/day"), loggingInspection);
+      doc.querySelector(".sheet-close").click();
+      await wait(80);
+
+      win.__wildrootTest.openBuildingType("hearth");
+      await wait(100);
+      const homeInspection = doc.querySelector(".inspection-grid")?.textContent || "";
+      check("housing inspection names nearby noise and wellbeing effects", homeInspection.includes("Residential noise") && homeInspection.includes("Civic Workshop") && homeInspection.includes("morale/day") && homeInspection.includes("health/day"), homeInspection);
+      doc.querySelector(".sheet-close").click();
+      await wait(80);
+
+      clickWorld(win, canvas, 54.5, 49.5);
+      await wait(100);
+      const farmInspection = doc.querySelector(".inspection-grid")?.textContent || "";
+      check("farm names pollution loss", farmInspection.includes("24% output loss") && farmInspection.includes("Civic Workshop"), farmInspection);
+      doc.querySelector(".sheet-close").click();
+      win.__wildrootTest.fillTimberStorage();
+      await wait(80);
+      const storagePausedNoise = win.__wildrootTest.noiseReport(true);
+      check("automatic full-storage pause also silences the Logging Camp", storagePausedNoise.activeSourceCount === dayNoise.activeSourceCount - 1 && storagePausedNoise.moodLoss < dayNoise.moodLoss, `${dayNoise.activeSourceCount} → ${storagePausedNoise.activeSourceCount} active sources · ${dayNoise.moodLoss.toFixed(3)} → ${storagePausedNoise.moodLoss.toFixed(3)} morale loss`);
+    } catch (error) {
+      checks.push({ name: "uncaught test error", pass: false, detail: String(error?.stack || error) });
+    }
+    const passed = checks.every(item => item.pass);
+    result.textContent = `${passed ? "PASS" : "FAIL"}\n` + checks.map(item => `${item.pass ? "✓" : "✗"} ${item.name}${item.detail ? ` — ${item.detail}` : ""}`).join("\n");
+    document.title = passed ? "PASS" : "FAIL";
+  }, { once: true });
+  frame.src = "../index.html?test=interactions";
+</script>

@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#173c2f">
+  <title>Wildroot Village</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="forest-haze" aria-hidden="true"></div>
+
+  <div id="gameShell" class="game-shell">
+    <header class="topbar">
+      <div class="brand-block">
+        <div class="brand-mark" aria-hidden="true">W</div>
+        <div>
+          <h1>Wildroot Village</h1>
+          <p id="villageName">Mossbank Clearing</p>
+        </div>
+      </div>
+
+      <div class="calendar-block" aria-label="Current date and weather">
+        <div class="calendar-main">
+          <span id="seasonIcon" aria-hidden="true">🌱</span>
+          <strong id="dayLabel">Day 1 · Spring</strong>
+        </div>
+        <div class="calendar-detail">
+          <span id="clockLabel">06:00</span>
+          <span class="dot">•</span>
+          <span id="weatherLabel">Mild skies</span>
+        </div>
+      </div>
+
+      <div class="time-controls" aria-label="Time controls">
+        <button class="icon-button" id="pauseButton" type="button" aria-label="Pause time" title="Pause (Space)">Ⅱ</button>
+        <button class="speed-button active" data-speed="1" type="button" title="Normal simulation speed, including resident ageing">1×</button>
+        <button class="speed-button" data-speed="2" type="button" title="Everything advances at 2×, including resident ageing">2×</button>
+        <button class="speed-button" data-speed="3" type="button" title="Everything advances at 3×, including resident ageing">3×</button>
+      </div>
+
+      <div class="header-actions">
+        <button class="quiet-button" id="achievementsButton" type="button">
+          <span aria-hidden="true">◇</span> Achievements
+          <span id="achievementCount" class="button-count">0/11</span>
+        </button>
+        <button class="icon-button" id="menuButton" type="button" aria-label="Open menu" title="Menu">☰</button>
+      </div>
+    </header>
+
+    <section class="resource-strip" aria-label="Village resources">
+      <div class="resource-card" data-resource="population">
+        <span class="resource-icon people-icon" aria-hidden="true">●</span>
+        <span class="resource-copy"><small>People</small><strong id="populationValue">10 / 12</strong></span>
+        <span id="populationTrend" class="trend positive">+0.0</span>
+      </div>
+      <div class="resource-card" data-resource="food">
+        <span class="resource-icon food-icon" aria-hidden="true">◆</span>
+        <span class="resource-copy"><small>Food</small><strong id="foodValue">120/400</strong></span>
+        <span id="foodTrend" class="trend">0/day</span>
+      </div>
+      <div class="resource-card" data-resource="water">
+        <span class="resource-icon water-icon" aria-hidden="true">●</span>
+        <span class="resource-copy"><small>Water</small><strong id="waterValue">130/400</strong></span>
+        <span id="waterTrend" class="trend">0/day</span>
+      </div>
+      <div class="resource-card" data-resource="wood">
+        <span class="resource-icon wood-icon" aria-hidden="true">▰</span>
+        <span class="resource-copy"><small>Timber</small><strong id="woodValue">95/400</strong></span>
+        <span id="woodTrend" class="trend">0/day</span>
+      </div>
+      <div class="resource-card" data-resource="stone">
+        <span class="resource-icon stone-icon" aria-hidden="true">⬟</span>
+        <span class="resource-copy"><small>Stone</small><strong id="stoneValue">60/400</strong></span>
+        <span id="stoneTrend" class="trend">0/day</span>
+      </div>
+      <div class="resource-card eco-resource" data-resource="ecosystem">
+        <span class="resource-icon eco-icon" aria-hidden="true">✦</span>
+        <span class="resource-copy"><small>Ecosystem</small><strong id="ecosystemValue">91%</strong></span>
+        <span id="ecosystemTrend" class="trend">Stable</span>
+      </div>
+    </section>
+
+    <main class="workspace">
+      <aside class="build-panel panel">
+        <div class="panel-heading">
+          <div>
+            <span class="eyebrow">PLANNING DESK</span>
+            <h2>Build</h2>
+          </div>
+          <button id="collapseBuildButton" class="mini-button" type="button" aria-label="Collapse build panel">‹</button>
+        </div>
+
+        <div class="build-tabs" role="tablist" aria-label="Building categories">
+          <button class="build-tab active" data-category="all" type="button">All</button>
+          <button class="build-tab" data-category="village" type="button">Village</button>
+          <button class="build-tab" data-category="industry" type="button">Work</button>
+          <button class="build-tab" data-category="nature" type="button">Nature</button>
+        </div>
+
+        <div id="buildList" class="build-list" aria-live="polite"></div>
+
+        <div class="tool-row">
+          <button id="inspectTool" class="tool-button active" type="button" data-tool="inspect">
+            <span aria-hidden="true">⌕</span> Inspect
+          </button>
+          <button id="demolishTool" class="tool-button danger-tool" type="button" data-tool="demolish">
+            <span aria-hidden="true">⌁</span> Destroy
+          </button>
+        </div>
+      </aside>
+
+      <section class="map-section">
+        <div class="map-toolbar">
+          <div class="selection-summary">
+            <span id="selectionSwatch" class="selection-swatch inspect-swatch">⌕</span>
+            <span><small>Selected</small><strong id="selectionLabel">Inspect tool</strong></span>
+          </div>
+          <div class="map-hints">
+            <span><kbd>Drag</kbd> pan</span>
+            <span><kbd>Scroll</kbd> zoom</span>
+            <span><kbd>O</kbd>/<kbd>P</kbd> rotate</span>
+            <span><kbd>Click</kbd> person</span>
+            <span><kbd>Hold</kbd> toggle tree priority</span>
+            <span><kbd>Esc</kbd> cancel</span>
+            <span id="autosaveStatus">Saved locally</span>
+          </div>
+        </div>
+
+        <div id="mapFrame" class="map-frame">
+          <canvas id="gameCanvas" width="768" height="768" aria-label="A zoomable 100 by 100 forest world with an irregular village clearing, creeks, a river, bridges, buildings, trees, and moving residents"></canvas>
+          <button id="descriptionToggle" class="description-toggle" type="button" aria-pressed="true" title="Turn cursor descriptions off">ⓘ Descriptions on</button>
+          <div id="tileTooltip" class="tile-tooltip" role="tooltip" hidden></div>
+          <div id="mapMessage" class="map-message" aria-live="assertive"></div>
+          <div class="map-compass" aria-hidden="true"><span>N</span><i></i></div>
+          <div class="zoom-controls" aria-label="Map zoom controls">
+            <button id="zoomInButton" type="button" aria-label="Zoom in" title="Zoom in">+</button>
+            <span id="zoomLabel">85%</span>
+            <button id="zoomOutButton" type="button" aria-label="Zoom out" title="Zoom out">−</button>
+            <button id="centerMapButton" type="button" aria-label="Centre on village" title="Centre on village">⌾</button>
+          </div>
+        </div>
+
+        <div class="map-footer">
+          <div class="workers-summary">
+            <span class="workers-icon" aria-hidden="true">♟</span>
+            <div>
+              <small>Workers</small>
+              <strong id="workersLabel">0 jobs · 9 available</strong>
+              <span id="familiesLabel" class="workers-detail">0 children · School none · Education 28</span>
+            </div>
+          </div>
+          <div class="pressure-meter">
+            <div class="pressure-copy"><span>Settlement footprint</span><strong id="footprintLabel">Gentle</strong></div>
+            <div class="meter-track"><div id="footprintFill" class="meter-fill"></div></div>
+          </div>
+          <div class="coordinates" id="coordinatesLabel">100 × 100 forest world</div>
+        </div>
+      </section>
+
+      <aside class="insights-panel panel">
+        <section class="eco-card">
+          <div class="panel-heading compact">
+            <div>
+              <span class="eyebrow">LIVING SYSTEM</span>
+              <h2>Ecosystem</h2>
+            </div>
+            <div id="ecoBadge" class="eco-badge thriving">Thriving</div>
+          </div>
+          <div class="eco-score-row">
+            <div class="eco-ring" id="ecoRing"><span id="ecoRingValue">91</span><small>/ 100</small></div>
+            <p id="ecoSummary">The forest is resilient. Thoughtful growth will help it stay that way.</p>
+          </div>
+          <div id="ecoMetrics" class="eco-metrics"></div>
+        </section>
+
+        <section class="learning-card" aria-labelledby="learningTitle">
+          <div class="section-title-row">
+            <h3 id="learningTitle">Eco coach</h3>
+            <span id="learningProgress">0/20 lessons</span>
+          </div>
+          <div class="coach-focus">
+            <span id="ecoCoachIcon" class="coach-icon" aria-hidden="true">◎</span>
+            <div><small>WATCH NOW</small><strong id="ecoCoachMetric">Living systems</strong></div>
+          </div>
+          <p id="ecoCoachText">Every resource decision changes the land that supports the village.</p>
+          <div class="coach-drivers" aria-label="Modelled causes of the current ecosystem trend">
+            <div><small>LARGEST PRESSURE</small><span id="ecoCoachPressure">Waiting for village data</span></div>
+            <div><small>STRONGEST SUPPORT</small><span id="ecoCoachSupport">Waiting for village data</span></div>
+          </div>
+          <p id="ecoCoachConnection" class="coach-connection">Living systems are connected through water, soil, air, habitat and food webs.</p>
+          <button id="fieldGuideButton" class="learning-guide-button" type="button"><span aria-hidden="true">▤</span> Open environmental field guide</button>
+        </section>
+
+        <section class="objective-card">
+          <div class="section-title-row">
+            <h3>Steward’s path</h3>
+            <span id="objectiveProgress">0/4</span>
+          </div>
+          <p id="objectiveIntro">Build the foundations of a village without wounding the land.</p>
+          <div id="objectiveList" class="objective-list"></div>
+        </section>
+
+        <section class="chronicle-card">
+          <div class="section-title-row">
+            <h3>Village chronicle</h3>
+            <button id="openChronicleButton" class="text-button" type="button">View all</button>
+          </div>
+          <div id="eventLog" class="event-log" aria-live="polite"></div>
+        </section>
+      </aside>
+    </main>
+  </div>
+
+  <div id="modalLayer" class="modal-layer" aria-live="polite"></div>
+
+  <div id="toastStack" class="toast-stack" aria-live="assertive"></div>
+
+  <template id="startScreenTemplate">
+    <div class="modal-backdrop start-backdrop">
+      <section class="start-card modal-card" role="dialog" aria-modal="true" aria-labelledby="startTitle">
+        <div class="start-art" aria-hidden="true">
+          <div class="moon"></div>
+          <div class="ridge ridge-back"></div>
+          <div class="ridge ridge-front"></div>
+          <div class="start-clearing"><span></span><span></span><span></span><span></span><span></span></div>
+        </div>
+        <div class="start-content">
+          <span class="eyebrow">AN ENVIRONMENTAL LEARNING GAME</span>
+          <h2 id="startTitle">Wildroot Village</h2>
+          <p class="start-tagline">Grow a home in the forest.<br><em>Leave enough wildness for tomorrow.</em></p>
+
+          <div class="start-mode-tabs" role="tablist" aria-label="Game mode">
+            <button id="freeplayModeButton" class="start-mode-button active" type="button" role="tab" aria-selected="true">New clearing</button>
+            <button id="scenarioModeButton" class="start-mode-button" type="button" role="tab" aria-selected="false">Eight scenarios</button>
+          </div>
+
+          <div id="freeplaySetup">
+            <label class="field-label" for="newVillageName">Name your settlement</label>
+            <input id="newVillageName" class="text-input" maxlength="28" value="Mossbank Clearing" autocomplete="off">
+
+            <fieldset class="difficulty-fieldset">
+              <legend>Choose difficulty</legend>
+              <label class="difficulty-option">
+                <input type="radio" name="difficulty" value="gentle">
+                <span><strong>Gentle</strong><small>More resources, kinder events</small></span>
+              </label>
+              <label class="difficulty-option selected">
+                <input type="radio" name="difficulty" value="balanced" checked>
+                <span><strong>Balanced</strong><small>The intended Wildroot experience</small></span>
+              </label>
+              <label class="difficulty-option">
+                <input type="radio" name="difficulty" value="harsh">
+                <span><strong>Harsh</strong><small>Scarcity and a fragile ecosystem</small></span>
+              </label>
+            </fieldset>
+          </div>
+
+          <div id="scenarioSetup" class="scenario-setup" hidden>
+            <p class="scenario-lead">Take charge of an existing village. Eight settlements teach different ecological problems; three begin below 40% with an active restoration emergency.</p>
+            <div id="scenarioList" class="scenario-list"></div>
+          </div>
+
+          <div class="start-actions">
+            <button id="continueGameButton" class="secondary-button" type="button" hidden>Continue saved village</button>
+            <button id="beginGameButton" class="primary-button" type="button">Begin a new village</button>
+          </div>
+          <p class="local-note">Village, learning and achievement progress save in this browser.</p>
+        </div>
+      </section>
+    </div>
+  </template>
+
+  <template id="tutorialTemplate">
+    <div class="modal-backdrop tutorial-backdrop">
+      <section class="tutorial-card modal-card" role="dialog" aria-modal="true" aria-labelledby="tutorialTitle">
+        <button class="close-button tutorial-skip" type="button">Skip tutorial</button>
+        <div class="tutorial-illustration" aria-hidden="true"></div>
+        <div class="tutorial-copy">
+          <span class="eyebrow tutorial-step-label">STEWARDSHIP LESSON 1 OF 7</span>
+          <h2 id="tutorialTitle">Welcome to the clearing</h2>
+          <p class="tutorial-body"></p>
+          <div class="tutorial-tip"></div>
+          <div class="tutorial-footer">
+            <div class="tutorial-dots" aria-hidden="true"></div>
+            <div class="tutorial-nav">
+              <button class="secondary-button tutorial-back" type="button">Back</button>
+              <button class="primary-button tutorial-next" type="button">Next</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </template>
+
+  <script src="game.js"></script>
+</body>
+</html>

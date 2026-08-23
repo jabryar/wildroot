@@ -1,0 +1,146 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Wildroot smoke test</title>
+<style>body{font-family:monospace} iframe{width:1400px;height:1000px;border:0}</style>
+<pre id="result">RUNNING</pre>
+<iframe id="game"></iframe>
+<script>
+  const result = document.getElementById("result");
+  const frame = document.getElementById("game");
+  localStorage.clear();
+  const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const clickTile = (win, canvas, x, y) => {
+    const rect = canvas.getBoundingClientRect();
+    const scale = 28 * 0.85;
+    const canvasX = 384 + (x + 0.5 - 50) * scale;
+    const canvasY = 384 + (y + 0.5 - 50) * scale;
+    const options = {
+      bubbles: true,
+      pointerId: 7,
+      pointerType: "mouse",
+      button: 0,
+      buttons: 1,
+      clientX: rect.left + (canvasX / 768) * rect.width,
+      clientY: rect.top + (canvasY / 768) * rect.height
+    };
+    canvas.dispatchEvent(new win.PointerEvent("pointerdown", options));
+    canvas.dispatchEvent(new win.PointerEvent("pointerup", { ...options, buttons: 0 }));
+  };
+  const dragMap = (win, canvas, dx, dy) => {
+    const rect = canvas.getBoundingClientRect();
+    const start = { clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 };
+    const base = { bubbles: true, pointerId: 9, pointerType: "mouse", button: 0 };
+    canvas.dispatchEvent(new win.PointerEvent("pointerdown", { ...base, ...start, buttons: 1 }));
+    canvas.dispatchEvent(new win.PointerEvent("pointermove", { ...base, clientX: start.clientX + dx, clientY: start.clientY + dy, buttons: 1 }));
+    canvas.dispatchEvent(new win.PointerEvent("pointerup", { ...base, clientX: start.clientX + dx, clientY: start.clientY + dy, buttons: 0 }));
+    canvas.dispatchEvent(new win.PointerEvent("pointermove", { ...base, ...start, buttons: 0 }));
+  };
+
+  frame.addEventListener("load", async () => {
+    const win = frame.contentWindow;
+    const doc = frame.contentDocument;
+    const checks = [];
+    const check = (name, pass, detail = "") => checks.push({ name, pass: Boolean(pass), detail });
+    try {
+      check("start screen", Boolean(doc.getElementById("beginGameButton")));
+      doc.getElementById("beginGameButton").click();
+      await wait(80);
+      check("tutorial opens", Boolean(doc.querySelector(".tutorial-card")));
+      doc.querySelector(".tutorial-skip").click();
+      await wait(380);
+      check("game starts", !doc.getElementById("pauseButton").textContent.includes("▶"));
+
+      const stableBuildButton = doc.querySelector('[data-building="cottage"]');
+      await wait(700);
+      check("build button stays stable", stableBuildButton === doc.querySelector('[data-building="cottage"]') && stableBuildButton.isConnected);
+      check("different building sizes", doc.querySelector('[data-building="farm"] .size-chip').textContent === "4×3");
+      check("expanded building roster", doc.querySelectorAll("[data-building]").length >= 25, doc.querySelectorAll("[data-building]").length);
+      check("storage and managed timber listed", Boolean(doc.querySelector('[data-building="storage"]')) && Boolean(doc.querySelector('[data-building="wood_farm"]')));
+      check("passive buildings need no workers", ["storage", "well", "rain_garden", "sanctuary", "compost", "playground", "park", "windmill"].every(type => doc.querySelector(`[data-building="${type}"]`)?.dataset.jobs === "0"));
+      check("family buildings listed", Boolean(doc.querySelector('[data-building="school"]')) && Boolean(doc.querySelector('[data-building="playground"]')));
+      check("ten adult founders", doc.getElementById("familiesLabel").textContent.includes("0 children") && doc.querySelector('[data-resource="population"]').title.includes("10 adults"), doc.getElementById("familiesLabel").textContent);
+      check("ten villagers rendered", Number(doc.getElementById("gameCanvas").dataset.villagers) === 10, doc.getElementById("gameCanvas").dataset.villagers);
+
+      const placements = [
+        ["cottage", 46, 47],
+        ["farm", 55, 47],
+        ["well", 46, 53]
+      ];
+      for (const [building, x, y] of placements) {
+        doc.querySelector(`[data-building="${building}"]`).click();
+        if (building === "farm") {
+          win.dispatchEvent(new win.KeyboardEvent("keydown", { key: "p", bubbles: true }));
+          await wait(60);
+          check("P rotates building right", doc.getElementById("selectionLabel").textContent.includes("3×4") && doc.getElementById("selectionLabel").textContent.includes("E"), doc.getElementById("selectionLabel").textContent);
+          win.dispatchEvent(new win.KeyboardEvent("keydown", { key: "o", bubbles: true }));
+          await wait(60);
+          check("O rotates building left", doc.getElementById("selectionLabel").textContent.includes("4×3") && doc.getElementById("selectionLabel").textContent.includes("N"), doc.getElementById("selectionLabel").textContent);
+          win.dispatchEvent(new win.KeyboardEvent("keydown", { key: "p", bubbles: true }));
+        }
+        clickTile(win, doc.getElementById("gameCanvas"), x, y);
+        await wait(380);
+      }
+
+      check("three buildings placed", doc.getElementById("objectiveProgress").textContent === "3/4", doc.getElementById("objectiveProgress").textContent);
+      check("cottage used timber", Number.parseFloat(doc.getElementById("woodValue").textContent.replaceAll(",", "")) < 95, doc.getElementById("woodValue").textContent);
+      check("farm accepts three workers while well stays passive", doc.getElementById("workersLabel").textContent.includes("3 jobs") && doc.querySelector('[data-building="farm"]')?.dataset.workerCapacity === "3", doc.getElementById("workersLabel").textContent);
+      check("100x100 world label", doc.getElementById("coordinatesLabel").textContent.includes("100 × 100"));
+
+      doc.getElementById("inspectTool").click();
+      win.__wildrootTest.openBuildingType("farm");
+      await wait(100);
+      check("rotated footprint stored", doc.querySelector(".inspection-grid")?.textContent.includes("3 × 4 tiles · East"), doc.querySelector(".inspection-grid")?.textContent || "no inspection");
+      check("farm inspection explains full staffing boost", doc.querySelector(".inspection-grid")?.textContent.includes("3 / 3 assigned") && doc.querySelector(".inspection-grid")?.textContent.includes("3 workers = 2×"), doc.querySelector(".inspection-grid")?.textContent || "no inspection");
+      doc.querySelector(".sheet-close").click();
+      await wait(80);
+
+      const zoomBefore = doc.getElementById("zoomLabel").textContent;
+      doc.getElementById("zoomInButton").click();
+      await wait(80);
+      check("zoom controls", doc.getElementById("zoomLabel").textContent !== zoomBefore, `${zoomBefore} → ${doc.getElementById("zoomLabel").textContent}`);
+      doc.getElementById("centerMapButton").click();
+      dragMap(win, doc.getElementById("gameCanvas"), 90, 0);
+      await wait(80);
+      check("drag to pan", !doc.getElementById("coordinatesLabel").textContent.includes("tile 51,"), doc.getElementById("coordinatesLabel").textContent);
+      doc.getElementById("centerMapButton").click();
+
+      doc.querySelector('[data-speed="3"]').click();
+      await wait(80);
+      check("3x speed", doc.querySelector('[data-speed="3"]').classList.contains("active"));
+
+      doc.getElementById("menuButton").click();
+      await wait(80);
+      check("pause menu", Boolean(doc.getElementById("resumeMenuButton")));
+      doc.getElementById("achievementMenuButton").click();
+      await wait(80);
+      doc.querySelector(".sheet-close").click();
+      await wait(80);
+      check("returns to menu", Boolean(doc.getElementById("resumeMenuButton")));
+      doc.getElementById("resumeMenuButton").click();
+      await wait(80);
+      check("nested menu resumes", doc.querySelector('[data-speed="3"]').classList.contains("active"));
+
+      doc.getElementById("pauseButton").click();
+      await wait(80);
+      check("pause", doc.getElementById("pauseButton").textContent.includes("▶"));
+
+      const timberBeforeDestroy = Number.parseFloat(doc.getElementById("woodValue").textContent.replaceAll(",", ""));
+      win.confirm = () => true;
+      doc.getElementById("demolishTool").click();
+      clickTile(win, doc.getElementById("gameCanvas"), 46, 47);
+      await wait(380);
+      const timberAfterDestroy = Number.parseFloat(doc.getElementById("woodValue").textContent.replaceAll(",", ""));
+      check("destroy refunds 50% timber", timberAfterDestroy === timberBeforeDestroy + 9, `${timberBeforeDestroy} → ${timberAfterDestroy}`);
+
+      doc.getElementById("achievementsButton").click();
+      await wait(80);
+      check("achievement sheet", Boolean(doc.querySelector(".achievement-grid")));
+    } catch (error) {
+      checks.push({ name: "uncaught test error", pass: false, detail: String(error?.stack || error) });
+    }
+    const passed = checks.every(item => item.pass);
+    result.textContent = `${passed ? "PASS" : "FAIL"}\n` + checks.map(item => `${item.pass ? "✓" : "✗"} ${item.name}${item.detail ? ` — ${item.detail}` : ""}`).join("\n");
+    document.title = passed ? "PASS" : "FAIL";
+  }, { once: true });
+  frame.src = "../index.html?test=smoke";
+</script>
