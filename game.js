@@ -242,6 +242,20 @@
       buildEco: { soil: -0.2, water: -0.2 },
       dailyEco: { water: -0.14 }
     },
+    river_pump: {
+      id: "river_pump",
+      name: "River Pump",
+      short: "↟",
+      category: "village",
+      description: "Draws water from a neighbouring creek or river without building in the channel. Its screened intake causes only a small wildlife disturbance.",
+      cost: { wood: 16, stone: 10 },
+      size: { w: 1, h: 1 },
+      jobs: 0,
+      waterIntake: true,
+      impact: "low",
+      impactLabel: "−0.05 wildlife/day",
+      dailyEco: { wildlife: -0.05 }
+    },
     lumber: {
       id: "lumber",
       name: "Logging Camp",
@@ -1610,6 +1624,17 @@
     return { valid: true, reason: "" };
   }
 
+  function touchesWaterwayForState(target, originX, originY, size) {
+    for (let dy = 0; dy < size.h; dy++) {
+      for (let dx = 0; dx < size.w; dx++) {
+        const x = originX + dx;
+        const y = originY + dy;
+        if ([[0, -1], [1, 0], [0, 1], [-1, 0]].some(([offsetX, offsetY]) => getWaterwayTypeForState(target, x + offsetX, y + offsetY))) return true;
+      }
+    }
+    return false;
+  }
+
   function canOccupyOnState(target, type, originX, originY, rotation = 0) {
     const bridgeStatus = getBridgePlacementStatusForState(target, type, originX, originY, rotation);
     if (bridgeStatus) return bridgeStatus.valid;
@@ -1623,7 +1648,7 @@
         if (target.occupancy[tileIndex(x, y)]) return false;
       }
     }
-    return true;
+    return !BUILDINGS[type]?.waterIntake || touchesWaterwayForState(target, originX, originY, size);
   }
 
   function addBuildingToState(target, type, originX, originY, builtDay, id, rotation = 0) {
@@ -3346,6 +3371,9 @@
         case "well":
           rates.water += 29 * active * weather.waterOutput * waterFactor * marketBoost;
           break;
+        case "river_pump":
+          rates.water += 24 * active * marketBoost;
+          break;
         case "lumber":
           if (includeDiscreteLoggingForecast) rates.wood += getProjectedLoggingTimberRate(building, state, staffedProductionActive);
           break;
@@ -4341,6 +4369,9 @@
         if (state.occupancy[tileIndex(x, y)]) return { valid: false, reason: "That footprint overlaps another building." };
       }
     }
+    if (BUILDINGS[type]?.waterIntake && !touchesWaterwayForState(state, originX, originY, size)) {
+      return { valid: false, reason: "The River Pump must sit on cleared land beside a creek or river." };
+    }
     return { valid: true, reason: "" };
   }
 
@@ -4713,6 +4744,7 @@
       river_bridge: "A walkable crossing over three river tiles without filling the channel",
       farm: "About 25 food/day with two farmers; up to 50/day with three before season, soil and nearby pollution",
       well: "About 29 water/day before weather and water quality",
+      river_pump: "24 water/day from a neighbouring creek or river; −0.05 wildlife/day",
       lumber: "A five-hour outside-zone base felling time with a full crew, 10× speed inside the zone, matching stump speed, 5–10 timber from healthy trees, 30% less from fire-damaged trees, and a full-storage pause unless manually overridden",
       wood_farm: "16 managed tree plots; each supplies 5–10 timber and regrows in 5 days",
       hunter: "About 16 food/day before wildlife health",
@@ -4749,6 +4781,7 @@
     if (type === "orchard") return "Food production depends on healthy soil, clean water and pollinators. Nearby pollution makes that ecosystem service less productive.";
     if (type === "apiary") return "Pollinators connect wild habitat to food production, so biodiversity can directly improve harvests.";
     if (type === "well") return "Groundwater is renewed by a slow water cycle. Several clean Wells can still extract water faster than rainfall replaces it.";
+    if (type === "river_pump") return "A screened river intake can supply water without blocking a channel, but even a small withdrawal can disturb aquatic habitat. This pump's only ecological effect is −0.05 wildlife per day.";
     if (type === "rain_garden") return "Capturing rain and slowing runoff works with the water cycle instead of relying only on extraction. Optional helpers can double both collected water and beneficial filtration during the day.";
     if (type === "reservoir") return "Capturing rain and slowing runoff helps the village work with the water cycle instead of relying only on extraction.";
     if (type === "compost") return "Compost returns organic matter and nutrients to soil, closing part of the village’s material cycle.";
@@ -4772,7 +4805,7 @@
     if (type === "lumber") return "Is timber demand worth the habitat removed, can every load be stored, and is regrowth keeping pace with felling?";
     if (type === "wood_farm") return "Does this managed supply reduce pressure on wild forest while leaving enough varied habitat for other species?";
     if (["farm", "orchard"].includes(type)) return "Can soil, water and pollinators recover as quickly as this food system uses them, and is local air clean enough for a reliable harvest?";
-    if (["well", "reservoir", "rain_garden"].includes(type)) return "Does this add water security by restoring and capturing the cycle, or mainly by drawing more from it?";
+    if (["well", "river_pump", "reservoir", "rain_garden"].includes(type)) return "Does this add water security by restoring and capturing the cycle, or mainly by drawing more from it?";
     if (BUILDINGS[type]?.pollution || BUILDINGS[type]?.noise) return "Who or what is exposed here—crops, forest, water and residents at home—and could emissions or noise be prevented before a buffer is needed?";
     if (["sanctuary", "park", "playground", "apiary"].includes(type)) return "Which species and ecosystem process does this space support, and is it part of a varied habitat network?";
     if (["compost", "storage", "granary"].includes(type)) return "Does this prevent waste and close a material cycle, or only make room for greater consumption?";
@@ -6613,6 +6646,14 @@
         ctx.fillStyle = "#427b8a"; ctx.beginPath(); ctx.ellipse(0, 1, 5.5, 2.8, 0, 0, Math.PI * 2); ctx.fill();
         ctx.strokeStyle = "#65492f"; ctx.lineWidth = 1.5; ctx.strokeRect(-6, -7, 12, 8);
         ctx.fillStyle = "#624432"; ctx.beginPath(); ctx.moveTo(-8, -6); ctx.lineTo(0, -11); ctx.lineTo(8, -6); ctx.closePath(); ctx.fill();
+        break;
+      case "river_pump":
+        ctx.fillStyle = "#5f6a64"; ctx.fillRect(-8, -2, 16, 10);
+        ctx.fillStyle = "#39443f"; ctx.fillRect(-5, -8, 10, 6);
+        ctx.strokeStyle = "#b7c6bf"; ctx.lineWidth = 1.6;
+        ctx.beginPath(); ctx.moveTo(0, -8); ctx.lineTo(0, -14); ctx.lineTo(9, -14); ctx.lineTo(9, 3); ctx.stroke();
+        ctx.fillStyle = "#5f9bad"; ctx.beginPath(); ctx.arc(0, 3, 4, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = "#d5e5de"; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(-2, 3); ctx.lineTo(2, 3); ctx.moveTo(0, 1); ctx.lineTo(0, 5); ctx.stroke();
         break;
       case "lumber":
         house("#8e714b", "#4d392a");
