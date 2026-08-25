@@ -96,6 +96,7 @@
           <button class="build-tab" data-category="village" type="button">Village</button>
           <button class="build-tab" data-category="industry" type="button">Work</button>
           <button class="build-tab" data-category="nature" type="button">Nature</button>
+          <button class="build-tab" data-category="decoration" type="button">Decorations</button>
         </div>
 
         <div id="buildList" class="build-list" aria-live="polite"></div>
@@ -129,6 +130,14 @@
 
         <div id="mapFrame" class="map-frame">
           <canvas id="gameCanvas" width="768" height="768" aria-label="A zoomable 100 by 100 forest world with an irregular village clearing, creeks, a river, bridges, buildings, trees, and moving residents"></canvas>
+          <section id="placementGuide" class="placement-guide" aria-live="polite">
+            <span id="placementGuideStep" class="eyebrow">LIVE BUILD TUTORIAL · STEP 1 OF 7</span>
+            <h3 id="placementGuideTitle">Place a Cottage</h3>
+            <p id="placementGuideText">Select Cottage, then click a clear 2 × 2 area near the Founders’ Hearth.</p>
+            <p id="placementGuideWhy" class="placement-guide-why"><strong>Why:</strong> Homes give new residents somewhere to live.</p>
+            <p id="placementGuideSpot" class="placement-guide-spot">Recommended spot: checking the clearing…</p>
+            <button id="placementGuideAction" class="primary-button" type="button">Select Cottage</button>
+          </section>
           <button id="descriptionToggle" class="description-toggle" type="button" aria-pressed="true" title="Turn cursor descriptions off">ⓘ Descriptions on</button>
           <div id="tileTooltip" class="tile-tooltip" role="tooltip" hidden></div>
           <div id="mapMessage" class="map-message" aria-live="assertive"></div>
@@ -277,8 +286,8 @@
         <button class="close-button tutorial-skip" type="button">Skip tutorial</button>
         <div class="tutorial-illustration" aria-hidden="true"></div>
         <div class="tutorial-copy">
-          <span class="eyebrow tutorial-step-label">STEWARDSHIP LESSON 1 OF 7</span>
-          <h2 id="tutorialTitle">Welcome to the clearing</h2>
+          <span class="eyebrow tutorial-step-label">BUILDING TUTORIAL 1 OF 8</span>
+          <h2 id="tutorialTitle">How building placement works</h2>
           <p class="tutorial-body"></p>
           <div class="tutorial-tip"></div>
           <div class="tutorial-footer">

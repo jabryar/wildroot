@@ -362,7 +362,7 @@ input:focus-visible {
 
 .build-tabs {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: 3px;
   padding: 4px;
   margin: 15px 0 10px;
@@ -374,7 +374,7 @@ input:focus-visible {
   padding: 7px 3px;
   border-radius: 6px;
   color: var(--faint);
-  font-size: 10px;
+  font-size: 9px;
 }
 
 .build-tab.active,
@@ -632,6 +632,58 @@ kbd {
   cursor: crosshair;
   image-rendering: auto;
   touch-action: none;
+}
+
+.placement-guide {
+  position: absolute;
+  z-index: 8;
+  left: 12px;
+  bottom: 12px;
+  width: min(285px, calc(100% - 24px));
+  padding: 13px 14px;
+  border: 1px solid rgba(131, 200, 120, .42);
+  border-radius: 9px;
+  background: rgba(8, 34, 26, .93);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .28);
+}
+
+.placement-guide[hidden] {
+  display: none;
+}
+
+.placement-guide h3 {
+  margin: 5px 0 6px;
+  color: var(--ink);
+  font: 17px Georgia, serif;
+  font-weight: 500;
+}
+
+.placement-guide p {
+  margin: 0 0 10px;
+  color: #c3d2c0;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.placement-guide p.placement-guide-why,
+.placement-guide p.placement-guide-spot {
+  margin-bottom: 7px;
+  padding-left: 8px;
+  border-left: 2px solid rgba(131, 200, 120, .55);
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.placement-guide p.placement-guide-spot {
+  border-left-color: rgba(228, 189, 101, .62);
+  color: #d8cc9f;
+}
+
+.placement-guide button {
+  width: 100%;
+  min-height: 31px;
+  padding: 7px 10px;
+  font-size: 10px;
 }
 
 .description-toggle {

@@ -465,9 +465,88 @@
       impact: "low",
       impactLabel: "Clean power",
       noise: 0.65,
+      noiseRange: 3,
       unlockPopulation: 22,
       buildEco: { soil: -0.5, biodiversity: -0.2 },
       dailyEco: { air: 0.035 }
+    },
+    flower_patch: {
+      id: "flower_patch",
+      name: "Native Flower Patch",
+      short: "✿",
+      category: "decoration",
+      description: "A small native flower patch that supports pollinators and adds colour to the village.",
+      cost: { wood: 2 },
+      size: { w: 1, h: 1 },
+      jobs: 0,
+      impact: "restores",
+      impactLabel: "+0.01 biodiversity/day",
+      dailyEco: { biodiversity: 0.01 }
+    },
+    native_shrub: {
+      id: "native_shrub",
+      name: "Native Shrub",
+      short: "♣",
+      category: "decoration",
+      description: "A hardy local shrub that offers small pockets of shelter and habitat.",
+      cost: { wood: 2 },
+      size: { w: 1, h: 1 },
+      jobs: 0,
+      impact: "restores",
+      impactLabel: "+0.01 biodiversity/day",
+      dailyEco: { biodiversity: 0.01 }
+    },
+    bird_bath: {
+      id: "bird_bath",
+      name: "Bird Bath",
+      short: "◌",
+      category: "decoration",
+      description: "A small water feature that gives birds a safe place to drink in the clearing.",
+      cost: { stone: 2 },
+      size: { w: 1, h: 1 },
+      jobs: 0,
+      impact: "restores",
+      impactLabel: "+0.01 wildlife/day",
+      dailyEco: { wildlife: 0.01 }
+    },
+    bench: {
+      id: "bench",
+      name: "Village Bench",
+      short: "▰",
+      category: "decoration",
+      description: "A simple timber bench for villagers, with a very small built-land footprint.",
+      cost: { wood: 3 },
+      size: { w: 1, h: 1 },
+      jobs: 0,
+      impact: "low",
+      impactLabel: "−0.01 soil/day",
+      dailyEco: { soil: -0.01 }
+    },
+    lantern: {
+      id: "lantern",
+      name: "Path Lantern",
+      short: "♦",
+      category: "decoration",
+      description: "A compact lantern that marks a path but adds a tiny amount of hard surface.",
+      cost: { wood: 2, stone: 1 },
+      size: { w: 1, h: 1 },
+      jobs: 0,
+      impact: "low",
+      impactLabel: "−0.01 soil/day",
+      dailyEco: { soil: -0.01 }
+    },
+    stone_statue: {
+      id: "stone_statue",
+      name: "Stone Statue",
+      short: "♜",
+      category: "decoration",
+      description: "A 2 × 2 stone landmark. Its heavy foundation puts lasting pressure on the soil.",
+      cost: { stone: 14 },
+      size: { w: 2, h: 2 },
+      jobs: 0,
+      impact: "medium",
+      impactLabel: "−0.10 soil/day",
+      dailyEco: { soil: -0.1 }
     },
     school: {
       id: "school",
@@ -585,6 +664,11 @@
     .filter(def => def.id !== "hearth")
     .sort((a, b) => (a.unlockPopulation || 0) - (b.unlockPopulation || 0) || a.name.localeCompare(b.name))
     .map(def => def.id);
+
+  function getNoisePollutionRange(buildingOrType) {
+    const type = typeof buildingOrType === "string" ? buildingOrType : buildingOrType?.type;
+    return BUILDINGS[type]?.noiseRange || NOISE_POLLUTION_RANGE;
+  }
 
   const ECO_LABELS = {
     forest: "Forest cover",
@@ -1379,7 +1463,7 @@
     }
   ];
 
-  const TUTORIAL_SLIDES = [
+  const BLOG_POSTS = [
     {
       title: "Welcome to the clearing",
       body: "Your founders have opened an irregular clearing inside a 100 × 100 ancient forest. Grow their village for as long as you can—but if the overall ecosystem falls below 5%, or any one of its six indicators reaches 0%, the settlement is lost with it.",
@@ -1436,6 +1520,17 @@
     }
   ];
 
+  const PLACEMENT_TUTORIAL_STEPS = [
+    { title: "How building placement works", body: "Open the Planning Desk on the left, choose a building, then move your cursor over the map. The highlighted footprint shows every tile it needs. Click only when the whole shape is on connected clearing: forest, water, existing buildings and villagers’ paths cannot be built over.", tip: "Read each building card first: it shows the cost, footprint, job slots and impact. Press O or P before clicking to rotate a building; drag to pan and scroll to zoom.", art: "linear-gradient(30deg, transparent 48%, rgba(237,210,142,.45) 49% 52%, transparent 53%), repeating-linear-gradient(90deg, #315d3b 0 24px, #396b42 25px 48px)" },
+    { title: "1. Place a Cottage", body: "Choose Cottage from the Village section. It needs a clear 2 × 2 square and costs 18 timber and 5 stone. Place it near the Founders’ Hearth so new residents have a home, but leave room around it for future services and paths.", tip: "Keep homes away from the purple noise zones of a Logging Camp or Stone Quarry. A Cottage has no workers to assign—it simply adds six homes.", art: "radial-gradient(circle at 50% 48%, #d7c39a 0 13%, transparent 14%), linear-gradient(135deg, #315d3b 0 48%, #8b5c49 49% 68%, #173a28 69%)" },
+    { title: "2. Place a Field Farm and Well", body: "Choose Field Farm and find a 4 × 3 clear rectangle away from pollution. It costs 16 timber and 2 stone. Then place a 1 × 1 Village Well nearby for water; it costs 12 timber and 12 stone. The Farm needs two farmers for normal food output, while the Well works automatically.", tip: "Do not put Farms beside Logging Camps, Quarries or Workshops: their pollution reduces crop output. A third farmer doubles food output, but also doubles water use and ecological pressure.", art: "repeating-linear-gradient(90deg, #8a7942 0 10px, #a99a57 11px 20px), linear-gradient(#4d7d51, #244b32)" },
+    { title: "3. Place your first Logging Camp", body: "Choose Logging Camp and place its 3 × 2 footprint on clearing beside—not on—the forest. Hovering shows its circular 15 × 15 work zone: place the circle over trees or a mature Wood Farm so the two loggers work 10× faster there.", tip: "Leave a five-tile buffer between the camp and occupied Cottages. It is noisy and removes habitat. Build only when you have storage room: full timber storage pauses the camp automatically.", art: "radial-gradient(circle at 34% 52%, transparent 0 24%, rgba(225,169,93,.58) 25% 27%, transparent 28%), linear-gradient(90deg, #244f35 0 50%, #735f3f 51% 70%, #2a4b32 71%)" },
+    { title: "4. Place a Stone Quarry carefully", body: "Choose Stone Quarry and reserve a 4 × 3 clear rectangle well away from homes, Farms and waterways. It costs 20 timber and needs three workers. It makes stone, but its dust, noise and soil damage are serious local costs.", tip: "Treat a Quarry as a distant work site: use the map’s open edge, not the centre of your food-and-housing area. Inspect it after building to see exactly what it affects.", art: "linear-gradient(135deg, #5f6658 0 42%, #8b8066 43% 61%, #2b4c38 62%)" },
+    { title: "5. Add a Storehouse before resources spill", body: "Choose Storehouse in Village and place its compact 2 × 2 footprint near the Hearth or production area. It costs 28 timber and 12 stone, needs no workers, and adds 200 capacity to food, water, timber and stone.", tip: "Watch the resource bars along the top. Production above a full resource limit is lost, so add storage before expanding a busy Farm, Camp or Quarry.", art: "linear-gradient(90deg, #3b5a3b 0 30%, #9b7a4e 31% 68%, #234533 69%)" },
+    { title: "6. Protect space for a Wild Sanctuary", body: "Choose Wild Sanctuary in Nature when you can afford its 22 timber and 4 stone cost. It needs a 4 × 4 clear block and no workers. Place it next to remaining forest or other green spaces, away from pollution and heavy noise.", tip: "A Sanctuary restores forest, wildlife and biodiversity. Connecting it to wild land makes it a meaningful counterweight to the Camp, Quarry and Farm instead of an isolated decorative square.", art: "radial-gradient(circle at 50% 48%, rgba(153,215,124,.65) 0 25%, transparent 26%), linear-gradient(#315f3e, #173a28)" },
+    { title: "A dependable first layout", body: "Build homes, food and water close together; put the Logging Camp and Stone Quarry out at the clearing’s edge; keep a Storehouse close to where supplies are used; and join Wild Sanctuaries to the forest. Select any building again to inspect its footprint, staffing and local effects.", tip: "Your first practical order: Cottage → Field Farm → Village Well → Logging Camp → Stone Quarry → Storehouse → Wild Sanctuary. Pause whenever you need to plan—good placement matters more than rushing.", art: "radial-gradient(circle at 22% 44%, #d7c39a 0 6%, transparent 7%), radial-gradient(circle at 50% 52%, #a99a57 0 15%, transparent 16%), radial-gradient(circle at 78% 42%, #8bc47c 0 13%, transparent 14%), linear-gradient(#315d3b, #173a28)" }
+  ];
+
   let state;
   let gameActive = false;
   let selectedBuilding = null;
@@ -1454,6 +1549,7 @@
   let mapGesture = null;
   let treePriorityTimer = 0;
   let weatherVisualTime = 0;
+  let tutorialSuggestedPlacement = null;
   const weatherParticles = [];
   const villagers = [];
   let villagerSignature = "";
@@ -1685,6 +1781,52 @@
       }
     }
     return null;
+  }
+
+  function tutorialPlacementIsClean(target, type, x, y, rotation = 0) {
+    const size = getBuildingSize(type, rotation);
+    const candidate = { type, x, y, w: size.w, h: size.h };
+    const def = BUILDINGS[type];
+    const buildings = target.buildings || [];
+
+    // Never recommend a footprint inside an existing fume or sound-pollution zone.
+    if (buildings.some(building => (BUILDINGS[building.type]?.pollution > 0 && buildingGap(candidate, building) <= CROP_POLLUTION_RANGE)
+      || (BUILDINGS[building.type]?.noise > 0 && buildingGap(candidate, building) <= getNoisePollutionRange(building)))) return false;
+
+    // A recommended polluter must also keep its own pollution away from crops
+    // and homes, so the guided layout remains safe as it grows.
+    if (def.pollution > 0 && buildings.some(building => ["farm", "orchard"].includes(building.type)
+      && buildingGap(candidate, building) <= CROP_POLLUTION_RANGE)) return false;
+    if (def.noise > 0 && buildings.some(building => BUILDINGS[building.type]?.housing
+      && buildingGap(candidate, building) <= getNoisePollutionRange(candidate))) return false;
+    return true;
+  }
+
+  function findTidyTutorialPlacement(target, type, preferredX, preferredY, maxRadius = 24, rotation = 0) {
+    const size = getBuildingSize(type, rotation);
+    const candidates = [];
+    for (let radius = 0; radius <= maxRadius; radius++) {
+      for (let dy = -radius; dy <= radius; dy++) {
+        for (let dx = -radius; dx <= radius; dx++) {
+          if (radius && Math.abs(dx) !== radius && Math.abs(dy) !== radius) continue;
+          const x = preferredX + dx;
+          const y = preferredY + dy;
+          if (!canOccupyOnState(target, type, x, y, rotation) || !tutorialPlacementIsClean(target, type, x, y, rotation)) continue;
+          const candidate = { type, x, y, w: size.w, h: size.h };
+          const nearbyTown = (target.buildings || []).filter(building => !BUILDINGS[building.type]?.pollution && !BUILDINGS[building.type]?.noise);
+          const nearestGap = nearbyTown.length
+            ? Math.min(...nearbyTown.map(building => buildingGap(candidate, building)))
+            : 2;
+          const preferredDistance = Math.abs(dx) + Math.abs(dy);
+          // Keep homes, services and green spaces compact without squeezing
+          // them on top of one another. Industry is already placed at safe edges.
+          const neatness = BUILDINGS[type].category === "industry" ? 0 : Math.abs(nearestGap - 1.5) * 1.5;
+          candidates.push({ x, y, score: preferredDistance + neatness });
+        }
+      }
+    }
+    candidates.sort((a, b) => a.score - b.score || a.y - b.y || a.x - b.x);
+    return candidates[0] || null;
   }
 
   function getBuildingAtForState(target, x, y) {
@@ -2298,8 +2440,42 @@
     return RESIDENT_LIFESPAN_MIN_DAYS + Math.floor(seededNoise(id, 197, target.terrainSeed) * range);
   }
 
+  function elderAgeForPerson(target, id) {
+    // Residents are children through age 6, then adults until their individual
+    // elder threshold between ages 35 and 40.
+    return 35 + Math.floor(seededNoise(id, 241, target.terrainSeed) * 6);
+  }
+
+  function ageGroupForPerson(person, atTime = getWorldTime()) {
+    const age = Math.max(0, atTime - Number(person.birthAt));
+    const elderAge = Number.isFinite(Number(person.elderAgeDays))
+      ? clamp(Number(person.elderAgeDays), 35, 40)
+      : 35;
+    if (age < 7) return "child";
+    if (age < elderAge) return "adult";
+    return "elder";
+  }
+
+  function syncLifeStagesForState(target = state, atTime = getWorldTime(target)) {
+    const people = Array.isArray(target.people) ? target.people : [];
+    for (const person of people) {
+      if (!Number.isFinite(Number(person.birthAt))) continue;
+      person.elderAgeDays = Number.isFinite(Number(person.elderAgeDays))
+        ? clamp(Number(person.elderAgeDays), 35, 40)
+        : elderAgeForPerson(target, person.id);
+      person.ageGroup = ageGroupForPerson(person, atTime);
+    }
+    target.demographics = {
+      children: people.filter(person => person.ageGroup === "child").length,
+      adults: people.filter(person => person.ageGroup === "adult").length,
+      elders: people.filter(person => person.ageGroup === "elder").length
+    };
+    target.population = people.length;
+  }
+
   function createPersonLifecycle(target, id, ageGroup, origin, joinedAt) {
     let deathAgeDays = residentDeathAgeForPerson(target, id);
+    const elderAgeDays = elderAgeForPerson(target, id);
     const ageRoll = seededNoise(id, 223, target.terrainSeed);
     let ageAtArrival;
 
@@ -2318,17 +2494,16 @@
     } else if (ageGroup === "child") {
       ageAtArrival = origin === "village-born" ? 0 : ageRoll * 7;
     } else if (ageGroup === "elder") {
-      const earliestElderAge = Math.max(35, deathAgeDays - 8);
-      ageAtArrival = earliestElderAge + ageRoll * Math.max(0.5, deathAgeDays - 1 - earliestElderAge);
+      ageAtArrival = elderAgeDays + ageRoll * Math.max(0.01, deathAgeDays - elderAgeDays);
     } else {
-      const oldestAdultAge = Math.max(8, Math.min(39, deathAgeDays - 8));
-      ageAtArrival = origin === "village-born" ? 7 : 7 + ageRoll * (oldestAdultAge - 7);
+      ageAtArrival = origin === "village-born" ? 7 : 7 + ageRoll * Math.max(0.01, elderAgeDays - 7);
     }
 
     const birthAt = joinedAt - ageAtArrival;
     return {
       birthAt,
       deathAgeDays,
+      elderAgeDays,
       lifeEndsAt: birthAt + deathAgeDays,
       settlementLifespanDays: birthAt + deathAgeDays - joinedAt
     };
@@ -2350,6 +2525,7 @@
       joinedAt,
       birthAt: lifecycle.birthAt,
       deathAgeDays: lifecycle.deathAgeDays,
+      elderAgeDays: lifecycle.elderAgeDays,
       lifeEndsAt: lifecycle.lifeEndsAt,
       settlementLifespanDays: lifecycle.settlementLifespanDays,
       lifespanStartedAt: lifecycle.birthAt,
@@ -2407,6 +2583,9 @@
         : person.joinedDay <= 1 ? "founder" : "established";
       person.joinedAt = Number.isFinite(Number(person.joinedAt)) ? Number(person.joinedAt) : person.joinedDay;
       const generatedLifecycle = createPersonLifecycle(target, person.id, person.ageGroup, person.origin, currentTime);
+      person.elderAgeDays = Number.isFinite(Number(person.elderAgeDays))
+        ? clamp(Number(person.elderAgeDays), 35, 40)
+        : generatedLifecycle.elderAgeDays;
       const hasNewLifecycle = Number.isFinite(Number(person.birthAt)) && Number.isFinite(Number(person.deathAgeDays));
       if (hasNewLifecycle) {
         person.birthAt = Number(person.birthAt);
@@ -2450,18 +2629,9 @@
       target.people.push(createPersonRecord(target, deficits[0].amount > 0 ? deficits[0].age : "child", usedNames, origin));
     }
 
-    const convert = (from, to, amount, newest = false) => {
-      const candidates = target.people.filter(person => person.ageGroup === from).sort((a, b) => newest ? b.id - a.id : a.id - b.id);
-      for (let index = 0; index < Math.min(amount, candidates.length); index++) candidates[index].ageGroup = to;
-    };
-    let counts = ageCounts();
-    if (counts.child > targetChildren) convert("child", "adult", counts.child - targetChildren, false);
-    counts = ageCounts();
-    if (counts.elder < targetElders) convert("adult", "elder", targetElders - counts.elder, false);
-    counts = ageCounts();
-    if (counts.child < targetChildren) convert("adult", "child", targetChildren - counts.child, true);
-    counts = ageCounts();
-    if (counts.elder > targetElders) convert("elder", "adult", counts.elder - targetElders, true);
+    // A resident's stage is determined only by their own birthday. Do not
+    // reshuffle people between stages to make the aggregate demographics fit.
+    syncLifeStagesForState(target, currentTime);
     return target.people;
   }
 
@@ -3037,20 +3207,21 @@
   function getNoiseSourceHousingInfo(source, target = state, staffedProductionActive = null) {
     const def = BUILDINGS[source?.type];
     if (!(def?.noise > 0)) {
-      return { homesInRange: 0, occupiedHomes: 0, exposedResidents: 0, averageExposure: 0, moodLoss: 0, healthLoss: 0, activity: 0, homes: [] };
+      return { homesInRange: 0, occupiedHomes: 0, exposedResidents: 0, averageExposure: 0, moodLoss: 0, healthLoss: 0, activity: 0, range: 0, homes: [] };
     }
     const activity = getNoiseActivity(source, target, staffedProductionActive);
+    const noiseRange = getNoisePollutionRange(source);
     const homes = (target.buildings || [])
       .filter(building => BUILDINGS[building.type]?.housing)
       .map(building => {
         const distance = buildingGap(source, building);
         const residents = (target.people || []).filter(person => person.homeBuildingId === building.id).length;
-        const baseExposure = distance <= NOISE_POLLUTION_RANGE
-          ? def.noise * (1 - distance / (NOISE_POLLUTION_RANGE + 1))
+        const baseExposure = distance <= noiseRange
+          ? def.noise * (1 - distance / (noiseRange + 1))
           : 0;
         return { building, distance, residents, exposure: baseExposure * activity };
       })
-      .filter(home => home.distance <= NOISE_POLLUTION_RANGE);
+      .filter(home => home.distance <= noiseRange);
     const residentExposure = homes.reduce((sum, home) => sum + home.exposure * home.residents, 0);
     const population = Math.max(1, (target.people || []).length);
     const averageExposure = residentExposure / population;
@@ -3062,6 +3233,7 @@
       moodLoss: averageExposure * NOISE_MORALE_LOSS_PER_EXPOSURE,
       healthLoss: averageExposure * NOISE_HEALTH_LOSS_PER_EXPOSURE,
       activity,
+      range: noiseRange,
       homes
     };
   }
@@ -3074,12 +3246,13 @@
       .map(building => {
         const distance = buildingGap(house, building);
         const activity = getNoiseActivity(building, target, staffedProductionActive);
-        const exposure = distance <= NOISE_POLLUTION_RANGE
-          ? BUILDINGS[building.type].noise * (1 - distance / (NOISE_POLLUTION_RANGE + 1)) * activity
+        const noiseRange = getNoisePollutionRange(building);
+        const exposure = distance <= noiseRange
+          ? BUILDINGS[building.type].noise * (1 - distance / (noiseRange + 1)) * activity
           : 0;
         return { building, distance, activity, exposure };
       })
-      .filter(source => source.distance <= NOISE_POLLUTION_RANGE);
+      .filter(source => source.distance <= getNoisePollutionRange(source.building));
     const exposure = sources.reduce((sum, source) => sum + source.exposure, 0);
     return {
       residents,
@@ -3105,12 +3278,13 @@
         const sourcesInRange = noiseSources
           .map(source => {
             const distance = buildingGap(building, source.building);
-            const exposure = distance <= NOISE_POLLUTION_RANGE
-              ? BUILDINGS[source.building.type].noise * (1 - distance / (NOISE_POLLUTION_RANGE + 1)) * source.activity
+            const noiseRange = getNoisePollutionRange(source.building);
+            const exposure = distance <= noiseRange
+              ? BUILDINGS[source.building.type].noise * (1 - distance / (noiseRange + 1)) * source.activity
               : 0;
             return { ...source, distance, exposure };
           })
-          .filter(source => source.distance <= NOISE_POLLUTION_RANGE);
+          .filter(source => source.distance <= getNoisePollutionRange(source.building));
         const exposure = sourcesInRange.reduce((sum, source) => sum + source.exposure, 0);
         return {
           building,
@@ -3288,19 +3462,12 @@
   }
 
   function updateDemographics(deltaDays) {
-    const groups = normaliseDemographics();
     const coverage = getSchoolCoverage();
     const educationTarget = getSchoolCapacity() > 0 ? 38 + coverage * 60 : 18;
     if (!isVillagerNight()) {
       state.education = clamp(state.education + (educationTarget - state.education) * Math.min(1, deltaDays * 0.045), 0, 100);
     }
-
-    const graduating = Math.min(groups.children, groups.children / 7 * deltaDays);
-    const ageing = Math.min(groups.adults, groups.adults / 180 * deltaDays);
-    groups.children -= graduating;
-    groups.adults += graduating - ageing;
-    groups.elders += ageing;
-    state.population = groups.children + groups.adults + groups.elders;
+    syncLifeStagesForState(state, getWorldTime() + deltaDays);
   }
 
   function getProductionRates(staffedProductionActive = !isVillagerNight(), includeDiscreteLoggingForecast = true) {
@@ -3575,6 +3742,8 @@
     state.health = clamp(state.health + rates.health * deltaDays, 0, 100);
     state.happiness = clamp(state.happiness + rates.happiness * deltaDays, 0, 100);
     applyPopulationChange(rates.population * deltaDays);
+    // Materialise any population change before recalculating birthday-based stages.
+    syncPeopleRoster();
     updateDemographics(deltaDays);
     syncPeopleRoster();
     expireResidents(getWorldTime() + deltaDays);
@@ -4572,7 +4741,7 @@
         : homeNoise.sources.length
           ? `No residents assigned · potential -${homeNoise.moodLoss.toFixed(2)} morale/day and -${homeNoise.healthLoss.toFixed(2)} health/day if occupied`
           : "No active wellbeing loss";
-      contextRows.push(`<div class="inspection-row"><span>Residential noise</span><strong>${homeNoise.sourcesInRange} source${homeNoise.sourcesInRange === 1 ? "" : "s"} within ${NOISE_POLLUTION_RANGE} tiles · ${sourceStatus} · ${exposureText}</strong></div>`);
+      contextRows.push(`<div class="inspection-row"><span>Residential noise</span><strong>${homeNoise.sourcesInRange} source${homeNoise.sourcesInRange === 1 ? "" : "s"} within their active noise zones · ${sourceStatus} · ${exposureText}</strong></div>`);
     }
     if (def.storage) {
       contextRows.push(`<div class="inspection-row"><span>Resource storage</span><strong>${def.storage} food, water, timber and stone each · village total ${getStorageCapacity("wood")} each</strong></div>`);
@@ -4595,7 +4764,7 @@
       const noiseEffect = noise.activity > 0.00001
         ? `-${noise.moodLoss.toFixed(2)} village morale/day · -${noise.healthLoss.toFixed(2)} health/day`
         : "Currently quiet · no active wellbeing loss";
-      contextRows.push(`<div class="inspection-row"><span>Noise pollution</span><strong>${noise.occupiedHomes} occupied / ${noise.homesInRange} total home${noise.homesInRange === 1 ? "" : "s"} in the ${NOISE_POLLUTION_RANGE}-tile zone · ${noise.exposedResidents} resident${noise.exposedResidents === 1 ? "" : "s"} · ${noiseEffect}</strong></div>`);
+      contextRows.push(`<div class="inspection-row"><span>Noise pollution</span><strong>${noise.occupiedHomes} occupied / ${noise.homesInRange} total home${noise.homesInRange === 1 ? "" : "s"} in the ${noise.range}-tile zone · ${noise.exposedResidents} resident${noise.exposedResidents === 1 ? "" : "s"} · ${noiseEffect}</strong></div>`);
     }
     const learningNote = buildingLearningNote(building);
     const decisionPrompt = buildingDecisionPrompt(building);
@@ -4917,7 +5086,7 @@
     dom.modalLayer.innerHTML = "";
     renderAll();
     saveGame();
-    showTutorial(true);
+    showBlog(false, true);
   }
 
   function startScenario(scenarioId) {
@@ -4954,7 +5123,7 @@
             <div class="inspection-row"><span>Existing village</span><strong>${escapeHtml(scenario.villageName)} · ${state.buildings.length} buildings</strong></div>
             <div class="inspection-row"><span>Starting point</span><strong>Day ${state.day} · ${escapeHtml(season.name)} · ${state.population} residents</strong></div>
             <div class="inspection-row"><span>Living system</span><strong>${score}% ecosystem · ${escapeHtml(WEATHERS[state.weather].name)}</strong></div>
-            <div class="inspection-row"><span>Children</span><strong>${Math.round(state.demographics.children)} · Grow into adults in 7 days</strong></div>
+            <div class="inspection-row"><span>Life stages</span><strong>Child to 7 · Adult to 35–40 · Elder thereafter</strong></div>
             <div class="inspection-row"><span>Collapse rule</span><strong>Lose below ${ECOSYSTEM_COLLAPSE_THRESHOLD}% overall or when any indicator reaches 0%</strong></div>
             ${scenario.restoration ? `<div class="inspection-row restoration-crisis-row" data-restoration-crisis><span>Active decline</span><strong>${projectedEcoRate >= 0 ? "+" : ""}${projectedEcoRate.toFixed(1)} ecosystem/day · ${escapeHtml(crisis.label)}</strong></div>
             <div class="inspection-row"><span>Stop the crisis</span><strong>${escapeHtml(scenario.crisisResolution)}</strong></div>` : ""}
@@ -4979,7 +5148,20 @@
     });
   }
 
-  function showTutorial(startPlayingAfter = false, returnToMenu = false) {
+  function showPlacementTutorial(startPlayingAfter = false, returnToMenu = false) {
+    showSlideDeck(PLACEMENT_TUTORIAL_STEPS, "BUILDING TUTORIAL", { startPlayingAfter, returnToMenu, finalButton: "Start playing", skipButton: "Skip tutorial" });
+  }
+
+  function showBlog(returnToMenu = true, startPlayingAfter = false) {
+    showSlideDeck(BLOG_POSTS, "VILLAGE BLOG", {
+      returnToMenu,
+      startPlayingAfter,
+      finalButton: startPlayingAfter ? "Enter village" : "Back to menu",
+      skipButton: startPlayingAfter ? "Enter village" : "Close blog"
+    });
+  }
+
+  function showSlideDeck(slides, label, { startPlayingAfter = false, returnToMenu = false, finalButton = "Done", skipButton = "Close" } = {}) {
     const wasRunning = gameActive && !state.paused;
     state.paused = true;
     let slide = 0;
@@ -4988,27 +5170,28 @@
     const renderSlide = () => {
       dom.modalLayer.innerHTML = "";
       dom.modalLayer.appendChild(document.getElementById("tutorialTemplate").content.cloneNode(true));
-      const data = TUTORIAL_SLIDES[slide];
+      const data = slides[slide];
       const card = dom.modalLayer.querySelector(".tutorial-card");
-      card.querySelector(".tutorial-step-label").textContent = `STEWARDSHIP LESSON ${slide + 1} OF ${TUTORIAL_SLIDES.length}`;
+      card.querySelector(".tutorial-step-label").textContent = `${label} ${slide + 1} OF ${slides.length}`;
       card.querySelector("h2").textContent = data.title;
       card.querySelector(".tutorial-body").textContent = data.body;
       card.querySelector(".tutorial-tip").textContent = data.tip;
       card.querySelector(".tutorial-illustration").style.backgroundImage = data.art;
-      card.querySelector(".tutorial-dots").innerHTML = TUTORIAL_SLIDES.map((_, index) => `<span class="${index === slide ? "active" : ""}"></span>`).join("");
+      card.querySelector(".tutorial-dots").innerHTML = slides.map((_, index) => `<span class="${index === slide ? "active" : ""}"></span>`).join("");
       const back = card.querySelector(".tutorial-back");
       const next = card.querySelector(".tutorial-next");
       back.style.visibility = slide === 0 ? "hidden" : "visible";
-      next.textContent = slide === TUTORIAL_SLIDES.length - 1 ? "Start playing" : "Next";
+      next.textContent = slide === slides.length - 1 ? finalButton : "Next";
       back.addEventListener("click", () => { slide -= 1; renderSlide(); });
       next.addEventListener("click", () => {
-        if (slide < TUTORIAL_SLIDES.length - 1) {
+        if (slide < slides.length - 1) {
           slide += 1;
           renderSlide();
         } else {
           finishTutorial();
         }
       });
+      card.querySelector(".tutorial-skip").textContent = skipButton;
       card.querySelector(".tutorial-skip").addEventListener("click", finishTutorial);
     };
 
@@ -5022,7 +5205,7 @@
       }
       if (startPlayingAfter) {
         addLog("The Steward’s first plans were laid out. Time begins.", true);
-        showToast("The village is yours", "Build a Cottage, Farm and Well to begin.", "W");
+        showToast("The village is yours", "Start with a Cottage, Farm and Well; the building tutorial is always in the menu.", "W");
       }
       renderAll();
     };
@@ -5047,7 +5230,8 @@
           <div class="menu-actions">
             <button id="resumeMenuButton" class="primary-button" type="button">Resume village</button>
             <button id="saveMenuButton" class="secondary-button" type="button">Save now</button>
-            <button id="tutorialMenuButton" class="secondary-button" type="button">Replay tutorial</button>
+            <button id="tutorialMenuButton" class="secondary-button" type="button">Building tutorial</button>
+            <button id="blogMenuButton" class="secondary-button" type="button">Village blog</button>
             <button id="fieldGuideMenuButton" class="secondary-button" type="button">Environmental field guide</button>
             <button id="achievementMenuButton" class="secondary-button" type="button">Achievements</button>
             <button id="newMenuButton" class="secondary-button danger-button" type="button">Start a new village</button>
@@ -5061,7 +5245,8 @@
       saveGame();
       showToast("Village saved", "Your progress is stored in this browser.", "✓");
     });
-    document.getElementById("tutorialMenuButton").addEventListener("click", () => showTutorial(false, true));
+    document.getElementById("tutorialMenuButton").addEventListener("click", () => showPlacementTutorial(false, true));
+    document.getElementById("blogMenuButton").addEventListener("click", () => showBlog(true));
     document.getElementById("fieldGuideMenuButton").addEventListener("click", () => showFieldGuide(() => openMenu(true)));
     document.getElementById("achievementMenuButton").addEventListener("click", () => showAchievements(() => openMenu(true)));
     document.getElementById("newMenuButton").addEventListener("click", () => {
@@ -5600,6 +5785,39 @@
     heading.textContent = chapter.title;
   }
 
+  function renderPlacementGuide() {
+    if (!dom.placementGuide) return;
+    const steps = [
+      { type: "cottage", title: "Place a Cottage", text: "Select Cottage, then click a clear 2 × 2 area near the Founders’ Hearth. Keep it away from the future noisy work sites.", why: "Homes give new residents somewhere to live, increasing your housing capacity by six.", action: "Select Cottage", preferred: [45, 47] },
+      { type: "farm", title: "Place a Field Farm", text: "Select Field Farm, then place its 4 × 3 footprint on clear land away from pollution. Two farmers provide normal food output.", why: "Farms turn available workers and water into the food your growing village needs.", action: "Select Field Farm", preferred: [54, 46] },
+      { type: "well", title: "Place a Village Well", text: "Select Village Well, then click one clear tile near your homes and Farm. It works automatically and supplies water.", why: "Water is needed every day by residents and is also used by Farms.", action: "Select Village Well", preferred: [47, 55] },
+      { type: "lumber", title: "Place a Logging Camp", text: "Select Logging Camp, then place its 3 × 2 footprint beside the forest. Keep Cottages outside its purple noise area; its circle should cover trees.", why: "Timber pays for most early buildings, but careless logging damages the forest that supports wildlife.", action: "Select Logging Camp", preferred: [39, 49] },
+      { type: "quarry", title: "Place a Stone Quarry", text: "Select Stone Quarry, then place its 4 × 3 footprint at the clearing’s edge, well away from homes, Farms and waterways.", why: "Stone unlocks sturdier village growth, but quarrying has strong local noise and pollution impacts.", action: "Select Stone Quarry", preferred: [57, 55] },
+      { type: "storage", title: "Place a Storehouse", text: "Select Storehouse, then place its 2 × 2 footprint near supplies. It adds 200 storage to every main resource and needs no workers.", why: "Without spare storage, extra food, water, timber and stone are lost when their bars become full.", action: "Select Storehouse", preferred: [48, 57] },
+      { type: "sanctuary", title: "Place a Wild Sanctuary", text: "Select Wild Sanctuary, then place its 4 × 4 footprint next to remaining forest, far from pollution and noise. It restores wildlife and biodiversity.", why: "A Sanctuary repays some of the ecological pressure from growing the village and protects habitat.", action: "Select Wild Sanctuary", preferred: [56, 56] }
+    ];
+    const stepIndex = steps.findIndex(step => !countBuilding(step.type));
+    const active = !getActiveScenario() && stepIndex >= 0;
+    dom.placementGuide.hidden = !active;
+    if (!active) {
+      tutorialSuggestedPlacement = null;
+      return;
+    }
+    const step = steps[stepIndex];
+    dom.placementGuideStep.textContent = `LIVE BUILD TUTORIAL · STEP ${stepIndex + 1} OF ${steps.length}`;
+    dom.placementGuideTitle.textContent = step.title;
+    dom.placementGuideText.textContent = step.text;
+    dom.placementGuideWhy.innerHTML = `<strong>Why:</strong> ${escapeHtml(step.why)}`;
+    const site = findTidyTutorialPlacement(state, step.type, step.preferred[0], step.preferred[1]);
+    const size = getBuildingSize(step.type);
+    tutorialSuggestedPlacement = site ? { type: step.type, x: site.x, y: site.y, w: size.w, h: size.h } : null;
+    dom.placementGuideSpot.textContent = site
+      ? `Recommended spot: move your cursor to map tile ${site.x + Math.floor(size.w / 2) + 1}, ${site.y + Math.floor(size.h / 2) + 1}. It is clear, outside pollution zones, and keeps the layout compact.`
+      : "Recommended spot: look for clear land outside every pollution and noise zone; the footprint preview must be fully green.";
+    dom.placementGuideAction.textContent = step.action;
+    dom.placementGuideAction.onclick = () => selectBuilding(step.type);
+  }
+
   function renderLog() {
     dom.eventLog.innerHTML = state.logs.slice(0, 4).map(log => `
       <div class="log-entry ${log.important ? "important" : ""}"><time>Day ${log.day}</time><p>${escapeHtml(log.text)}</p></div>`).join("");
@@ -5763,6 +5981,7 @@
     dom.gameCanvas.dataset.cropPollutionLoss = String(Math.round(worstCropPenalty * 100));
     dom.gameCanvas.dataset.forestPollution = forestPenalty.toFixed(1);
     dom.gameCanvas.dataset.noisePollutionRange = String(NOISE_POLLUTION_RANGE);
+    dom.gameCanvas.dataset.windmillNoisePollutionRange = String(getNoisePollutionRange("windmill"));
     dom.gameCanvas.dataset.noisePollutionTargets = "occupied-housing";
     dom.gameCanvas.dataset.noiseSourceCount = String(noiseSources.length);
     dom.gameCanvas.dataset.activeNoiseSources = String(currentNoise.activeSourceCount);
@@ -5807,6 +6026,8 @@
     dom.gameCanvas.dataset.perfectBalanceDifficulty = "harsh";
     dom.gameCanvas.dataset.buildingCount = String(state.buildings.length);
     dom.gameCanvas.dataset.childhoodDays = "7";
+    dom.gameCanvas.dataset.adultStageMinDays = "35";
+    dom.gameCanvas.dataset.adultStageMaxDays = "40";
     dom.gameCanvas.dataset.pollutionTargets = "crops-only";
     dom.gameCanvas.dataset.farmPolluters = String(state.buildings.filter(building => building.type === "farm" && BUILDINGS.farm.pollution).length);
     dom.gameCanvas.dataset.rawProducerPollutionLoss = String(Math.round(rawProducers.reduce((worst, building) => Math.max(worst, 1 - getLocalProductionFactor(building)), 0) * 100));
@@ -5860,6 +6081,7 @@
     renderEcosystem();
     renderLearning();
     renderObjectives();
+    renderPlacementGuide();
     renderLog();
     renderFooter();
     syncVillagers();
@@ -6072,7 +6294,7 @@
         ? ` · spans ${selected.bridge === "river" ? "three river tiles" : "one creek tile"} with a clearing tile on each bank`
         : "";
       const previewNoise = selected.noise ? getNoiseSourceHousingInfo(preview) : null;
-      const noiseDetail = previewNoise ? ` · ${NOISE_POLLUTION_RANGE}-tile noise zone reaches ${previewNoise.occupiedHomes} occupied home${previewNoise.occupiedHomes === 1 ? "" : "s"}` : "";
+      const noiseDetail = previewNoise ? ` · ${previewNoise.range}-tile noise zone reaches ${previewNoise.occupiedHomes} occupied home${previewNoise.occupiedHomes === 1 ? "" : "s"}` : "";
       html = `<strong>${placement.valid ? `Place ${escapeHtml(selected.name)}` : "Cannot build here"}</strong><span>${size.w} × ${size.h} footprint · ${["North", "East", "South", "West"][selectedRotation]}</span><span class="tooltip-impact">${escapeHtml(placement.valid ? `${selected.impactLabel}${crossingDetail}${zoneDetail}${noiseDetail} · O left / P right` : placement.reason)}</span>`;
     } else if (villagerHit) {
       const info = personWorkInfo(villagerHit.record);
@@ -6110,7 +6332,7 @@
       if (def.pollution) localDetail = `${getForestPollutionInfo(building).trees} forest trees exposed to pollution · ${localDetail}`;
       if (def.noise) {
         const noise = getNoiseSourceHousingInfo(building);
-        localDetail = `${noise.occupiedHomes} occupied home${noise.occupiedHomes === 1 ? "" : "s"} in ${NOISE_POLLUTION_RANGE}-tile noise zone · ${noise.exposedResidents} resident${noise.exposedResidents === 1 ? "" : "s"} · ${localDetail}`;
+        localDetail = `${noise.occupiedHomes} occupied home${noise.occupiedHomes === 1 ? "" : "s"} in ${noise.range}-tile noise zone · ${noise.exposedResidents} resident${noise.exposedResidents === 1 ? "" : "s"} · ${localDetail}`;
       }
       if (def.housing) {
         const homeNoise = getHousingNoiseInfo(building);
@@ -6229,11 +6451,33 @@
       drawBuilding(ctx, building, now);
     }
     drawVillagers(ctx, now);
+    drawTutorialRecommendation(ctx, now);
 
     if (hoveredTile && !hoveredVillagerId) drawHover(ctx, hoveredTile.x, hoveredTile.y);
     drawNight(ctx);
     drawNightLights(ctx, bounds);
     drawWeather(ctx, deltaMs);
+  }
+
+  function drawTutorialRecommendation(ctx, now) {
+    const recommendation = tutorialSuggestedPlacement;
+    if (!recommendation) return;
+    const scale = getTileScale();
+    const screen = worldToCanvas(recommendation.x, recommendation.y);
+    const pulse = 0.7 + Math.sin(now / 260) * 0.2;
+    const inset = Math.max(1, scale * 0.06);
+    const width = recommendation.w * scale - inset * 2;
+    const height = recommendation.h * scale - inset * 2;
+    ctx.save();
+    ctx.fillStyle = `rgba(33, 150, 243, ${0.08 + pulse * 0.07})`;
+    ctx.fillRect(screen.x + inset, screen.y + inset, width, height);
+    ctx.strokeStyle = `rgba(12, 93, 211, ${0.25 + pulse * 0.18})`;
+    ctx.lineWidth = Math.max(7, scale * 0.32);
+    ctx.strokeRect(screen.x + inset, screen.y + inset, width, height);
+    ctx.strokeStyle = `rgba(51, 170, 255, ${0.88 + pulse * 0.12})`;
+    ctx.lineWidth = Math.max(3.5, scale * 0.16);
+    ctx.strokeRect(screen.x + inset, screen.y + inset, width, height);
+    ctx.restore();
   }
 
   function drawTerrain(ctx, now, bounds) {
@@ -6557,7 +6801,9 @@
     const height = building.h * scale;
     const def = BUILDINGS[building.type];
     if (def.bridge) drawBridgeDeck(ctx, building, position, scale);
-    ctx.fillStyle = def.category === "nature" ? "rgba(79,129,68,.18)" : def.category === "industry" ? "rgba(112,80,49,.18)" : "rgba(165,144,96,.13)";
+    ctx.fillStyle = def.category === "nature" || (def.category === "decoration" && Object.values(def.dailyEco || {}).some(amount => amount > 0))
+      ? "rgba(79,129,68,.18)"
+      : def.category === "industry" ? "rgba(112,80,49,.18)" : "rgba(165,144,96,.13)";
     ctx.fillRect(position.x + scale * 0.08, position.y + scale * 0.08, width - scale * 0.16, height - scale * 0.16);
     ctx.strokeStyle = "rgba(221,231,190,.1)";
     ctx.lineWidth = 0.8;
@@ -6786,6 +7032,23 @@
         drawTree(ctx,-4,5,.62,getSeason().id,1); drawTree(ctx,6,7,.48,getSeason().id,1);
         ctx.strokeStyle="#b79a6c";ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(-9,8);ctx.quadraticCurveTo(0,0,9,8);ctx.stroke();
         break;
+      case "flower_patch":
+        ctx.shadowColor = "transparent"; ctx.fillStyle = "#4e803d"; ctx.beginPath(); ctx.arc(0, 4, 8, Math.PI, 0); ctx.fill();
+        ctx.fillStyle = "#e4bc62"; for (let i = -5; i <= 5; i += 5) { ctx.beginPath(); ctx.arc(i, -1, 3, 0, Math.PI * 2); ctx.fill(); }
+        break;
+      case "native_shrub":
+        ctx.shadowColor = "transparent"; ctx.fillStyle = "#3d733d"; ctx.beginPath(); ctx.arc(-4, 3, 5, 0, Math.PI * 2); ctx.arc(3, 1, 6, 0, Math.PI * 2); ctx.fill();
+        break;
+      case "bird_bath":
+        ctx.fillStyle = "#a7a99d"; ctx.beginPath(); ctx.ellipse(0, -1, 8, 3.5, 0, 0, Math.PI * 2); ctx.fill(); ctx.fillRect(-2, 1, 4, 8);
+        ctx.fillStyle = "#5d9db2"; ctx.beginPath(); ctx.ellipse(0, -1, 5.5, 1.8, 0, 0, Math.PI * 2); ctx.fill();
+        break;
+      case "bench":
+        ctx.fillStyle = "#8b603b"; ctx.fillRect(-9, -1, 18, 3); ctx.fillRect(-7, 3, 2, 6); ctx.fillRect(5, 3, 2, 6); break;
+      case "lantern":
+        ctx.strokeStyle = "#594634"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(0, 9); ctx.lineTo(0, -5); ctx.stroke(); ctx.fillStyle = "#f0ca6a"; ctx.fillRect(-3, -9, 6, 5); break;
+      case "stone_statue":
+        ctx.fillStyle = "#8c8c81"; ctx.fillRect(-5, -8, 10, 15); ctx.fillStyle = "#aaa99c"; ctx.beginPath(); ctx.arc(0, -11, 4, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = "#6b6d66"; ctx.fillRect(-9, 7, 18, 3); break;
       case "clinic":
         house("#c2bca6", "#566960");
         ctx.fillStyle="#b65f56";ctx.fillRect(-1,-1,2,6);ctx.fillRect(-3,1,6,2);
@@ -7285,13 +7548,14 @@
       ctx.strokeRect(topLeft.x, topLeft.y, (building.w + CROP_POLLUTION_RANGE * 2) * scale, (building.h + CROP_POLLUTION_RANGE * 2) * scale);
     }
     if (def.noise) {
-      const topLeft = worldToCanvas(building.x - NOISE_POLLUTION_RANGE, building.y - NOISE_POLLUTION_RANGE);
+      const noiseRange = getNoisePollutionRange(building);
+      const topLeft = worldToCanvas(building.x - noiseRange, building.y - noiseRange);
       ctx.setLineDash([Math.max(2, scale * 0.12), Math.max(3, scale * 0.2)]);
       ctx.fillStyle = "rgba(139,112,184,.035)";
       ctx.strokeStyle = "rgba(183,151,226,.58)";
       ctx.lineWidth = 1.2;
-      ctx.fillRect(topLeft.x, topLeft.y, (building.w + NOISE_POLLUTION_RANGE * 2) * scale, (building.h + NOISE_POLLUTION_RANGE * 2) * scale);
-      ctx.strokeRect(topLeft.x, topLeft.y, (building.w + NOISE_POLLUTION_RANGE * 2) * scale, (building.h + NOISE_POLLUTION_RANGE * 2) * scale);
+      ctx.fillRect(topLeft.x, topLeft.y, (building.w + noiseRange * 2) * scale, (building.h + noiseRange * 2) * scale);
+      ctx.strokeRect(topLeft.x, topLeft.y, (building.w + noiseRange * 2) * scale, (building.h + noiseRange * 2) * scale);
     }
     ctx.restore();
   }
@@ -7445,7 +7709,7 @@
     const ids = [
       "villageName", "seasonIcon", "dayLabel", "clockLabel", "weatherLabel", "pauseButton", "achievementsButton", "achievementCount", "menuButton",
       "populationValue", "populationTrend", "foodValue", "foodTrend", "waterValue", "waterTrend", "woodValue", "woodTrend", "stoneValue", "stoneTrend", "ecosystemValue", "ecosystemTrend",
-      "buildList", "collapseBuildButton", "inspectTool", "demolishTool", "selectionSwatch", "selectionLabel", "autosaveStatus", "mapFrame", "gameCanvas", "descriptionToggle", "tileTooltip", "mapMessage",
+      "buildList", "collapseBuildButton", "inspectTool", "demolishTool", "selectionSwatch", "selectionLabel", "autosaveStatus", "mapFrame", "gameCanvas", "placementGuide", "placementGuideStep", "placementGuideTitle", "placementGuideText", "placementGuideWhy", "placementGuideSpot", "placementGuideAction", "descriptionToggle", "tileTooltip", "mapMessage",
       "zoomInButton", "zoomOutButton", "centerMapButton", "zoomLabel",
       "workersLabel", "familiesLabel", "footprintLabel", "footprintFill", "coordinatesLabel", "ecoBadge", "ecoRing", "ecoRingValue", "ecoSummary", "ecoMetrics",
       "learningProgress", "ecoCoachIcon", "ecoCoachMetric", "ecoCoachText", "ecoCoachPressure", "ecoCoachSupport", "ecoCoachConnection", "fieldGuideButton",
@@ -7610,7 +7874,8 @@
             averageExposure: report.averageExposure,
             moodLoss: report.moodLoss,
             healthLoss: report.healthLoss,
-            range: NOISE_POLLUTION_RANGE
+            range: NOISE_POLLUTION_RANGE,
+            windmillRange: getNoisePollutionRange("windmill")
           };
         },
         wellbeingRates(staffedProductionActive = true) {
