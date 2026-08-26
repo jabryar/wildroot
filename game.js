@@ -2019,6 +2019,9 @@
       people: [],
       nextPersonId: 1,
       pendingTravellerResidents: 0,
+      // Population is represented by individual records, so retain fractional
+      // births and hardship losses here until they become a whole resident.
+      populationChangeProgress: 0,
       loggedTrees: {},
       priorityTrees: {},
       priorityStumps: {},
@@ -2232,6 +2235,11 @@
       ? Number(loaded.nextEventDay)
       : getWorldTime(merged) + eventGapFromRoll(seededNoise(merged.day, 313, merged.terrainSeed), merged.difficulty, merged.day);
     merged.pendingTravellerResidents = Math.max(0, Math.floor(Number(loaded.pendingTravellerResidents) || 0));
+    merged.populationChangeProgress = clamp(
+      Number.isFinite(Number(loaded.populationChangeProgress)) ? Number(loaded.populationChangeProgress) : 0,
+      -0.999999,
+      0.999999
+    );
     merged.scenarioId = SCENARIOS.some(scenario => scenario.id === loaded.scenarioId) ? loaded.scenarioId : null;
     initialiseWaterways(merged);
     initialiseAfterFireBurnedTrees(merged);
@@ -2550,6 +2558,11 @@
     target.people = Array.isArray(target.people) ? target.people : [];
     target.nextPersonId = Math.max(1, Math.floor(Number(target.nextPersonId) || 1));
     target.pendingTravellerResidents = Math.max(0, Math.floor(Number(target.pendingTravellerResidents) || 0));
+    target.populationChangeProgress = clamp(
+      Number.isFinite(Number(target.populationChangeProgress)) ? Number(target.populationChangeProgress) : 0,
+      -0.999999,
+      0.999999
+    );
     const firstRoster = target.people.length === 0 && target.nextPersonId === 1;
     const firstRosterOrigin = target.day <= 1 ? "founder" : "established";
     const currentTime = getWorldTime(target);
@@ -3409,6 +3422,21 @@
 
   function applyPopulationChange(amount, mix = null, options = {}) {
     if (!amount) return;
+    // Residents cannot be fractional. Keep gradual natural growth and decline
+    // between simulation ticks, then materialise a birth or loss only when a
+    // complete resident has accumulated. Without this, roster syncing floors
+    // every tiny growth tick back to the old population before it can add up.
+    if (options.origin !== "traveller") {
+      if (amount < 0 && state.population <= 0) {
+        state.populationChangeProgress = 0;
+        return;
+      }
+      const progress = (Number(state.populationChangeProgress) || 0) + amount;
+      const wholeResidents = progress > 0 ? Math.floor(progress) : Math.ceil(progress);
+      state.populationChangeProgress = progress - wholeResidents;
+      amount = wholeResidents;
+      if (!amount) return;
+    }
     const groups = normaliseDemographics();
     if (amount < 0) {
       const remaining = Math.max(0, state.population + amount);
@@ -3429,6 +3457,7 @@
       groups.elders += amount * (shares.elders || 0) / shareTotal;
     }
     state.population = groups.children + groups.adults + groups.elders;
+    if (state.population <= 0 && amount < 0) state.populationChangeProgress = 0;
   }
 
   function expireResidents(atTime = getWorldTime()) {
@@ -7838,6 +7867,22 @@
           }
           renderAll();
           drawMap(performance.now(), 0);
+        },
+        stepDays(days) {
+          const deltaDays = Math.max(0, Number(days) || 0);
+          if (gameActive && !state.paused && !state.gameOver && !dom.modalLayer.children.length) {
+            updateSimulation(deltaDays);
+          }
+          renderAll();
+          drawMap(performance.now(), 0);
+        },
+        populationDynamics() {
+          return {
+            population: state.population,
+            children: state.demographics.children,
+            people: state.people.length,
+            progress: state.populationChangeProgress
+          };
         },
         autumnProgress(day, dayProgress = 0) {
           return getAutumnColourProgress({ day, dayProgress });

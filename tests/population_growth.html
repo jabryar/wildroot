@@ -1,0 +1,47 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>RUNNING</title>
+<style>body{font-family:monospace} iframe{width:1400px;height:1000px;border:0}</style>
+<pre id="result">RUNNING</pre>
+<iframe id="game" src="../index.html?test=population-growth"></iframe>
+<script>
+  localStorage.setItem("wildroot-village-save-v1", JSON.stringify({
+    version: 2,
+    villageName: "Population Growth Test",
+    difficulty: "balanced",
+    day: 1, dayProgress: 0, speed: 1, paused: true,
+    weather: "mild", weatherFrom: "mild", weatherBlend: 1,
+    weatherStartedAt: 1, weatherDurationDays: 2, nextWeatherChange: 3, nextEventDay: 99,
+    population: 10, demographics: { children: 0, adults: 10, elders: 0 },
+    education: 28, health: 92, happiness: 82,
+    resources: { food: 300, water: 300, wood: 77, stone: 55 },
+    ecosystem: { forest: 92, wildlife: 87, water: 91, soil: 89, air: 96, biodiversity: 90 },
+    terrainSeed: 913472,
+    buildings: [
+      { type: "hearth", x: 49, y: 49, rotation: 0, builtDay: 1, id: 1 },
+      { type: "cottage", x: 45, y: 49, rotation: 0, builtDay: 1, id: 2 }
+    ],
+    people: [], nextPersonId: 1, pendingTravellerResidents: 0, populationChangeProgress: 0,
+    nextBuildingId: 3, camera: { x: 50, y: 50, zoom: .85 }, stats: {}
+  }));
+  const frame = document.getElementById("game");
+  const result = document.getElementById("result");
+  const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+  frame.addEventListener("load", async () => {
+    try {
+      await wait(250);
+      const doc = frame.contentDocument;
+      const win = frame.contentWindow;
+      doc.getElementById("continueGameButton").click();
+      await wait(80);
+      win.__wildrootTest.stepDays(2);
+      const dynamics = win.__wildrootTest.populationDynamics();
+      const pass = dynamics.people === 11 && dynamics.children === 1 && dynamics.progress >= 0 && dynamics.progress < 1;
+      result.textContent = `${pass ? "PASS" : "FAIL"}\n${JSON.stringify(dynamics)}`;
+      document.title = pass ? "PASS" : "FAIL";
+    } catch (error) {
+      result.textContent = `FAIL\n${error?.stack || error}`;
+      document.title = "FAIL";
+    }
+  }, { once: true });
+</script>
