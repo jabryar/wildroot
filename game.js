@@ -2034,6 +2034,7 @@
       occupancy: Array(WORLD_SIZE * WORLD_SIZE).fill(0),
       camera: { x: WORLD_CENTER, y: WORLD_CENTER, zoom: 0.85 },
       descriptionsEnabled: true,
+      placementTutorialCompleted: false,
       rng: seed,
       nextBuildingId: 2,
       nextEventDay: 4,
@@ -2241,6 +2242,7 @@
       0.999999
     );
     merged.scenarioId = SCENARIOS.some(scenario => scenario.id === loaded.scenarioId) ? loaded.scenarioId : null;
+    merged.placementTutorialCompleted = loaded.placementTutorialCompleted === true;
     initialiseWaterways(merged);
     initialiseAfterFireBurnedTrees(merged);
     merged.scenarioCompleted = Boolean(loaded.scenarioCompleted);
@@ -5259,7 +5261,7 @@
           <div class="menu-actions">
             <button id="resumeMenuButton" class="primary-button" type="button">Resume village</button>
             <button id="saveMenuButton" class="secondary-button" type="button">Save now</button>
-            <button id="tutorialMenuButton" class="secondary-button" type="button">Building tutorial</button>
+            ${state.placementTutorialCompleted ? "" : '<button id="tutorialMenuButton" class="secondary-button" type="button">Building tutorial</button>'}
             <button id="blogMenuButton" class="secondary-button" type="button">Village blog</button>
             <button id="fieldGuideMenuButton" class="secondary-button" type="button">Environmental field guide</button>
             <button id="achievementMenuButton" class="secondary-button" type="button">Achievements</button>
@@ -5274,7 +5276,7 @@
       saveGame();
       showToast("Village saved", "Your progress is stored in this browser.", "✓");
     });
-    document.getElementById("tutorialMenuButton").addEventListener("click", () => showPlacementTutorial(false, true));
+    document.getElementById("tutorialMenuButton")?.addEventListener("click", () => showPlacementTutorial(false, true));
     document.getElementById("blogMenuButton").addEventListener("click", () => showBlog(true));
     document.getElementById("fieldGuideMenuButton").addEventListener("click", () => showFieldGuide(() => openMenu(true)));
     document.getElementById("achievementMenuButton").addEventListener("click", () => showAchievements(() => openMenu(true)));
@@ -5817,16 +5819,20 @@
   function renderPlacementGuide() {
     if (!dom.placementGuide) return;
     const steps = [
-      { type: "cottage", title: "Place a Cottage", text: "Select Cottage, then click a clear 2 × 2 area near the Founders’ Hearth. Keep it away from the future noisy work sites.", why: "Homes give new residents somewhere to live, increasing your housing capacity by six.", action: "Select Cottage", preferred: [45, 47] },
-      { type: "farm", title: "Place a Field Farm", text: "Select Field Farm, then place its 4 × 3 footprint on clear land away from pollution. Two farmers provide normal food output.", why: "Farms turn available workers and water into the food your growing village needs.", action: "Select Field Farm", preferred: [54, 46] },
-      { type: "well", title: "Place a Village Well", text: "Select Village Well, then click one clear tile near your homes and Farm. It works automatically and supplies water.", why: "Water is needed every day by residents and is also used by Farms.", action: "Select Village Well", preferred: [47, 55] },
-      { type: "lumber", title: "Place a Logging Camp", text: "Select Logging Camp, then place its 3 × 2 footprint beside the forest. Keep Cottages outside its purple noise area; its circle should cover trees.", why: "Timber pays for most early buildings, but careless logging damages the forest that supports wildlife.", action: "Select Logging Camp", preferred: [39, 49] },
-      { type: "quarry", title: "Place a Stone Quarry", text: "Select Stone Quarry, then place its 4 × 3 footprint at the clearing’s edge, well away from homes, Farms and waterways.", why: "Stone unlocks sturdier village growth, but quarrying has strong local noise and pollution impacts.", action: "Select Stone Quarry", preferred: [57, 55] },
-      { type: "storage", title: "Place a Storehouse", text: "Select Storehouse, then place its 2 × 2 footprint near supplies. It adds 200 storage to every main resource and needs no workers.", why: "Without spare storage, extra food, water, timber and stone are lost when their bars become full.", action: "Select Storehouse", preferred: [48, 57] },
-      { type: "sanctuary", title: "Place a Wild Sanctuary", text: "Select Wild Sanctuary, then place its 4 × 4 footprint next to remaining forest, far from pollution and noise. It restores wildlife and biodiversity.", why: "A Sanctuary repays some of the ecological pressure from growing the village and protects habitat.", action: "Select Wild Sanctuary", preferred: [56, 56] }
+      { type: "cottage", title: "Place a Cottage", text: "Select Cottage, then click a clear 2 × 2 area near the Founders’ Hearth. Keep it away from the future noisy work sites.", why: "Homes give arriving families somewhere to live. Without housing, population growth stalls and you cannot fill the jobs that keep food and materials flowing.", action: "Select Cottage", preferred: [45, 47] },
+      { type: "farm", title: "Place a Field Farm", text: "Select Field Farm, then place its 4 × 3 footprint on clear land away from pollution. Two farmers provide normal food output.", why: "Farms turn workers and water into food every day. A village can only grow safely when its food supply stays ahead of its residents’ needs.", action: "Select Field Farm", preferred: [54, 46] },
+      { type: "well", title: "Place a Village Well", text: "Select Village Well, then click one clear tile near your homes and Farm. It works automatically and supplies water.", why: "Water keeps residents healthy and lets Farms produce food. A shortage quickly turns an otherwise successful expansion into a crisis.", action: "Select Village Well", preferred: [47, 55] },
+      { type: "lumber", title: "Place a Logging Camp", text: "Select Logging Camp, then place its 3 × 2 footprint beside the forest. Keep Cottages outside its purple noise area; its circle should cover trees.", why: "Timber pays for most early construction, but logging also removes habitat and adds noise. Its location teaches the central trade-off: grow the village while protecting the living systems that support it.", action: "Select Logging Camp", preferred: [39, 49] },
+      { type: "quarry", title: "Place a Stone Quarry", text: "Select Stone Quarry, then place its 4 × 3 footprint at the clearing’s edge, well away from homes, Farms and waterways.", why: "Stone enables larger, sturdier projects, yet quarry dust and noise can harm nearby homes, crops and soil. Keeping industry separate preserves future options for the village.", action: "Select Stone Quarry", preferred: [57, 55] },
+      { type: "storage", title: "Place a Storehouse", text: "Select Storehouse, then place its 2 × 2 footprint near supplies. It adds 200 storage to every main resource and needs no workers.", why: "Without spare storage, food, water, timber and stone produced above their limits disappear. Storage lets you save surpluses for building projects, bad weather and emergencies.", action: "Select Storehouse", preferred: [48, 57] },
+      { type: "sanctuary", title: "Place a Wild Sanctuary", text: "Select Wild Sanctuary, then place its 4 × 4 footprint next to remaining forest, far from pollution and noise. It restores wildlife and biodiversity.", why: "A Sanctuary reconnects habitat and helps repay the ecological pressure caused by homes, farming and industry. Healthy ecosystems make long-term growth more resilient.", action: "Select Wild Sanctuary", preferred: [56, 56] }
     ];
     const stepIndex = steps.findIndex(step => !countBuilding(step.type));
-    const active = !getActiveScenario() && stepIndex >= 0;
+    if (!getActiveScenario() && !state.placementTutorialCompleted && stepIndex < 0) {
+      completePlacementTutorial();
+      return;
+    }
+    const active = !getActiveScenario() && !state.placementTutorialCompleted && stepIndex >= 0;
     dom.placementGuide.hidden = !active;
     if (!active) {
       tutorialSuggestedPlacement = null;
@@ -5836,7 +5842,7 @@
     dom.placementGuideStep.textContent = `LIVE BUILD TUTORIAL · STEP ${stepIndex + 1} OF ${steps.length}`;
     dom.placementGuideTitle.textContent = step.title;
     dom.placementGuideText.textContent = step.text;
-    dom.placementGuideWhy.innerHTML = `<strong>Why:</strong> ${escapeHtml(step.why)}`;
+    dom.placementGuideWhy.innerHTML = `<strong>Why it matters:</strong> ${escapeHtml(step.why)}`;
     const site = findTidyTutorialPlacement(state, step.type, step.preferred[0], step.preferred[1]);
     const size = getBuildingSize(step.type);
     tutorialSuggestedPlacement = site ? { type: step.type, x: site.x, y: site.y, w: size.w, h: size.h } : null;
@@ -5845,6 +5851,27 @@
       : "Recommended spot: look for clear land outside every pollution and noise zone; the footprint preview must be fully green.";
     dom.placementGuideAction.textContent = step.action;
     dom.placementGuideAction.onclick = () => selectBuilding(step.type);
+    dom.placementGuideSkip.onclick = () => completePlacementTutorial(true);
+  }
+
+  function completePlacementTutorial(skipped = false) {
+    if (state.placementTutorialCompleted) return;
+    state.placementTutorialCompleted = true;
+    tutorialSuggestedPlacement = null;
+    saveGame();
+    pauseForModal(true);
+    dom.modalLayer.innerHTML = `
+      <div class="modal-backdrop">
+        <section class="sheet-modal modal-card tutorial-complete-card" role="dialog" aria-modal="true" aria-labelledby="tutorialCompleteTitle">
+          <span class="eyebrow">${skipped ? "BUILD TUTORIAL SKIPPED" : "BUILD TUTORIAL COMPLETE"}</span>
+          <h2 id="tutorialCompleteTitle">The next chapter is yours</h2>
+          <p>${skipped ? "You can begin planning in your own order." : "You now have the foundations of a balanced village."} Expand gradually: add homes as families arrive, then keep food, water and storage ahead of demand. Place timber and stone work at the edge of the clearing, and pair growth with protected green space.</p>
+          <p>Use the resource bars, building inspections and ecosystem forecasts to guide each next step. Good luck, Steward.</p>
+          <button id="tutorialCompleteButton" class="primary-button" type="button">Begin village</button>
+        </section>
+      </div>`;
+    document.getElementById("tutorialCompleteButton").addEventListener("click", () => closeModal(true));
+    renderAll();
   }
 
   function renderLog() {
@@ -7738,7 +7765,7 @@
     const ids = [
       "villageName", "seasonIcon", "dayLabel", "clockLabel", "weatherLabel", "pauseButton", "achievementsButton", "achievementCount", "menuButton",
       "populationValue", "populationTrend", "foodValue", "foodTrend", "waterValue", "waterTrend", "woodValue", "woodTrend", "stoneValue", "stoneTrend", "ecosystemValue", "ecosystemTrend",
-      "buildList", "collapseBuildButton", "inspectTool", "demolishTool", "selectionSwatch", "selectionLabel", "autosaveStatus", "mapFrame", "gameCanvas", "placementGuide", "placementGuideStep", "placementGuideTitle", "placementGuideText", "placementGuideWhy", "placementGuideSpot", "placementGuideAction", "descriptionToggle", "tileTooltip", "mapMessage",
+      "buildList", "collapseBuildButton", "inspectTool", "demolishTool", "selectionSwatch", "selectionLabel", "autosaveStatus", "mapFrame", "gameCanvas", "placementGuide", "placementGuideStep", "placementGuideTitle", "placementGuideText", "placementGuideWhy", "placementGuideSpot", "placementGuideAction", "placementGuideSkip", "descriptionToggle", "tileTooltip", "mapMessage",
       "zoomInButton", "zoomOutButton", "centerMapButton", "zoomLabel",
       "workersLabel", "familiesLabel", "footprintLabel", "footprintFill", "coordinatesLabel", "ecoBadge", "ecoRing", "ecoRingValue", "ecoSummary", "ecoMetrics",
       "learningProgress", "ecoCoachIcon", "ecoCoachMetric", "ecoCoachText", "ecoCoachPressure", "ecoCoachSupport", "ecoCoachConnection", "fieldGuideButton",

@@ -686,6 +686,36 @@ kbd {
   font-size: 10px;
 }
 
+.placement-guide .placement-guide-skip {
+  margin-top: 7px;
+  border-color: rgba(195, 210, 192, .4);
+  color: var(--muted);
+  background: transparent;
+}
+
+.placement-guide .placement-guide-skip:hover {
+  color: var(--ink);
+  background: rgba(255, 255, 255, .06);
+}
+
+.tutorial-complete-card {
+  max-width: 520px;
+}
+
+.tutorial-complete-card h2 {
+  margin: 8px 0 12px;
+}
+
+.tutorial-complete-card p {
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.tutorial-complete-card button {
+  width: 100%;
+  margin-top: 10px;
+}
+
 .description-toggle {
   position: absolute;
   z-index: 9;
