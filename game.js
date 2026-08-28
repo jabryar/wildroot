@@ -3349,10 +3349,11 @@
       if (!assigned || isLoggingStorageBlocked(building)) continue;
       const waitingStumps = getLoggingWorkStumps(building);
       const loggingTarget = getLoggingTarget(building);
-      // Marked trees override stump work. Otherwise every logger clears stumps before automatic felling resumes.
-      const priorityTreeActive = Boolean(loggingTarget?.priority);
-      const stumpWorkers = !priorityTreeActive && waitingStumps.length ? assigned : 0;
-      const fellers = priorityTreeActive || !waitingStumps.length ? assigned : 0;
+      // A manually marked stump is the most urgent clearing work; marked trees still outrank ordinary stumps.
+      const priorityStumpActive = Boolean(waitingStumps[0]?.priority);
+      const priorityTreeActive = Boolean(loggingTarget?.priority) && !priorityStumpActive;
+      const stumpWorkers = priorityStumpActive || (!priorityTreeActive && waitingStumps.length) ? assigned : 0;
+      const fellers = !priorityStumpActive && (priorityTreeActive || !waitingStumps.length) ? assigned : 0;
       building.stumpProgress = Math.max(0, Number(building.stumpProgress) || 0) + deltaDays * (stumpWorkers > 0 ? getLoggingStumpRate(building, waitingStumps[0]) : 0);
       building.loggingProgress = Math.max(0, Number(building.loggingProgress) || 0) + deltaDays * (fellers > 0 ? getLoggingFellingRate(building, loggingTarget) : 0);
 
@@ -4045,6 +4046,56 @@
     } catch {
       return null;
     }
+  }
+
+  function exportSaveFile() {
+    if (!state || !gameActive) return;
+    saveGame();
+    const payload = JSON.stringify(state, null, 2);
+    const blob = new Blob([payload], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const safeName = (state.villageName || "wildroot-village").replace(/[^a-z0-9-_]+/gi, "-").replace(/^-+|-+$/g, "") || "wildroot-village";
+    link.href = url;
+    link.download = `${safeName}-save.json`;
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    showToast("Save exported", "Keep the JSON file somewhere safe to restore this village later.", "⇩");
+  }
+
+  function importSaveFile(file) {
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      showToast("Import rejected", "Choose a Wildroot save smaller than 5 MB.", "!");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onerror = () => showToast("Import failed", "The selected file could not be read.", "!");
+    reader.onload = () => {
+      try {
+        const imported = JSON.parse(String(reader.result || ""));
+        const compatible = (imported?.version === SAVE_VERSION && Array.isArray(imported.buildings))
+          || (imported?.version === 1 && Array.isArray(imported.tiles));
+        if (!compatible) throw new Error("Not a compatible Wildroot save.");
+        if (!window.confirm(`Replace the current village with “${imported.villageName || "this imported village"}”?`)) return;
+        state = normaliseLoadedState(imported);
+        state.paused = true;
+        gameActive = true;
+        selectedBuilding = null;
+        activeTool = "inspect";
+        villagers.splice(0, villagers.length);
+        villagerSignature = "";
+        dom.modalLayer.innerHTML = "";
+        modalClosable = false;
+        saveGame();
+        renderAll();
+        showToast("Village imported", `${state.villageName} is ready to review before you resume time.`, "⇧");
+      } catch (error) {
+        console.warn("Save import failed.", error);
+        showToast("Import rejected", "Choose a valid Wildroot JSON save file.", "!");
+      }
+    };
+    reader.readAsText(file);
   }
 
   function showToast(title, message, icon = "✦") {
@@ -5274,6 +5325,9 @@
           <div class="menu-actions">
             <button id="resumeMenuButton" class="primary-button" type="button">Resume village</button>
             <button id="saveMenuButton" class="secondary-button" type="button">Save now</button>
+            <button id="exportMenuButton" class="secondary-button" type="button">Export save</button>
+            <button id="importMenuButton" class="secondary-button" type="button">Import save</button>
+            <input id="importSaveInput" type="file" accept="application/json,.json" hidden>
             ${state.placementTutorialCompleted ? "" : '<button id="tutorialMenuButton" class="secondary-button" type="button">Building tutorial</button>'}
             <button id="blogMenuButton" class="secondary-button" type="button">Village blog</button>
             <button id="fieldGuideMenuButton" class="secondary-button" type="button">Environmental field guide</button>
@@ -5289,6 +5343,9 @@
       saveGame();
       showToast("Village saved", "Your progress is stored in this browser.", "✓");
     });
+    document.getElementById("exportMenuButton").addEventListener("click", exportSaveFile);
+    document.getElementById("importMenuButton").addEventListener("click", () => document.getElementById("importSaveInput").click());
+    document.getElementById("importSaveInput").addEventListener("change", event => importSaveFile(event.target.files?.[0]));
     document.getElementById("tutorialMenuButton")?.addEventListener("click", () => showPlacementTutorial(false, true));
     document.getElementById("blogMenuButton").addEventListener("click", () => showBlog(true));
     document.getElementById("fieldGuideMenuButton").addEventListener("click", () => showFieldGuide(() => openMenu(true)));
@@ -6005,10 +6062,11 @@
     dom.gameCanvas.dataset.loggingTreesInRange = String(loggingCamps.reduce((sum, building) => sum + getLoggingTreesInRange(building).length, 0));
     dom.gameCanvas.dataset.loggingFarmSupply = String(loggingCamps.reduce((sum, building) => sum + getMatureWoodFarmSupply(building).length, 0));
     dom.gameCanvas.dataset.loggingManagedTargets = String(loggingCamps.filter(building => getLoggingTarget(building)?.kind === "farm").length);
-    dom.gameCanvas.dataset.loggingTargetOrder = "priority-tree,stumps,mature-managed-tree,unmarked-wild-tree";
+    dom.gameCanvas.dataset.loggingTargetOrder = "priority-stump,priority-tree,ordinary-stumps,mature-managed-tree,unmarked-wild-tree";
     dom.gameCanvas.dataset.loggingStopped = String(loggingCamps.filter(building => getLoggingAccessFactor(building) <= 0 || isLoggingStorageBlocked(building)).length);
     dom.gameCanvas.dataset.stumpPriorityCamps = String(loggingCamps.filter(building => !isLoggingStorageBlocked(building) && getAssignedWorkers(building.id) > 0 && getLoggingWorkStumps(building).length > 0 && !getLoggingTarget(building)?.priority).length);
-    dom.gameCanvas.dataset.priorityTreesOverrideStumps = String(loggingCamps.filter(building => !isLoggingStorageBlocked(building) && getLoggingWorkStumps(building).length > 0 && getLoggingTarget(building)?.priority).length);
+    dom.gameCanvas.dataset.priorityTreesOverrideStumps = String(loggingCamps.filter(building => !isLoggingStorageBlocked(building) && getLoggingWorkStumps(building).some(stump => !stump.priority) && getLoggingTarget(building)?.priority).length);
+    dom.gameCanvas.dataset.priorityStumpsOverrideTrees = String(loggingCamps.filter(building => !isLoggingStorageBlocked(building) && getLoggingWorkStumps(building)[0]?.priority && getLoggingTarget(building)?.priority).length);
     dom.gameCanvas.dataset.activeLoggingFellers = String(staffedWorkActive ? loggingCamps.reduce((sum, building) => {
       const target = getLoggingTarget(building);
       return sum + (!isLoggingStorageBlocked(building) && (target?.priority || !getLoggingWorkStumps(building).length) ? getAssignedWorkers(building.id) : 0);
@@ -6291,6 +6349,41 @@
     return true;
   }
 
+  function toggleStumpPriority(x, y) {
+    const index = tileIndex(x, y);
+    if (!inWorld(x, y) || !state.loggedTrees?.[index] || state.clearedTiles?.[index]) return false;
+    state.priorityStumps = state.priorityStumps || {};
+    state.remoteStumps = state.remoteStumps || {};
+    if (state.priorityStumps[index]) {
+      delete state.priorityStumps[index];
+      delete state.remoteStumps[index];
+      showToast("Stump priority removed", "Loggers will return to their normal stump queue.", "○");
+      addLog(`The priority mark was removed from the stump at ${x + 1}, ${y + 1}.`);
+    } else {
+      const camps = state.buildings
+        .filter(building => building.type === "lumber")
+        .map(camp => ({ camp, distance: (camp.x + camp.w / 2 - x - 0.5) ** 2 + (camp.y + camp.h / 2 - y - 0.5) ** 2 }))
+        .sort((a, b) => a.distance - b.distance);
+      const camp = camps[0]?.camp || null;
+      state.priorityStumps[index] = camp?.id || -1;
+      if (camp && !isTreeInLoggingRange(camp, x, y)) state.remoteStumps[index] = camp.id;
+      const detail = !camp
+        ? "The stump is marked and will wait for a Logging Camp."
+        : isTreeInLoggingRange(camp, x, y)
+          ? "The nearest Logging Camp will clear it before ordinary stumps."
+          : "The nearest Logging Camp will travel to clear it before ordinary stumps.";
+      showToast("Stump marked as priority", detail, "⌖");
+      addLog(`A stump at ${x + 1}, ${y + 1} was marked as a priority clearing target.`);
+    }
+    saveGame();
+    renderAll();
+    return true;
+  }
+
+  function toggleLoggingPriority(x, y) {
+    return toggleTreePriority(x, y) || toggleStumpPriority(x, y);
+  }
+
   function prioritizeTreesInArea(start, end) {
     const minX = clamp(Math.min(start.x, end.x), 0, WORLD_SIZE - 1);
     const maxX = clamp(Math.max(start.x, end.x), 0, WORLD_SIZE - 1);
@@ -6342,12 +6435,12 @@
       priorityAreaStart: activeTool === "tree_priority" ? { x: point.x, y: point.y } : null,
       priorityAreaEnd: activeTool === "tree_priority" ? { x: point.x, y: point.y } : null
     };
-    if (!selectedBuilding && activeTool === "inspect" && isStandingTree(point.x, point.y)) {
+    if (!selectedBuilding && activeTool === "inspect" && (isStandingTree(point.x, point.y) || (state.loggedTrees?.[tileIndex(point.x, point.y)] && !state.clearedTiles?.[tileIndex(point.x, point.y)]))) {
       mapGesture.priorityCandidate = { x: point.x, y: point.y };
       treePriorityTimer = window.setTimeout(() => {
         if (!mapGesture || mapGesture.pointerId !== event.pointerId || mapGesture.dragging) return;
         const candidate = mapGesture.priorityCandidate;
-        if (candidate && toggleTreePriority(candidate.x, candidate.y)) mapGesture.longPressTriggered = true;
+        if (candidate && toggleLoggingPriority(candidate.x, candidate.y)) mapGesture.longPressTriggered = true;
         treePriorityTimer = 0;
       }, TREE_PRIORITY_HOLD_MS);
     }
@@ -6481,7 +6574,8 @@
       const burnedStump = isBurnedTree(point.x, point.y);
       const stumpInFastZone = state.buildings.some(camp => camp.type === "lumber" && isTreeInLoggingRange(camp, point.x, point.y));
       const fireScarDetail = state.scenarioId === "burned_watershed" ? " · adjacent treeless fire-scar forest also opens" : "";
-      html = `<strong>${priorityStump ? "High-priority stump" : burnedStump ? "Charred logging stump" : "Logging stump"}</strong><span>World tile ${point.x + 1}, ${point.y + 1} · ${stumpInFastZone ? "10× zone speed · 30-minute base" : "outside zone · 5-hour base"}</span><span class="tooltip-impact">${priorityStump ? "Cleared before ordinary stumps" : "Cleared before automatic chopping"} · same speed as a tree here · +1 timber · becomes clearing${fireScarDetail}</span>`;
+      const priorityHint = priorityStump ? "Cleared before ordinary stumps · hold or use Tree priority to remove mark" : "Cleared before automatic chopping · hold or use Tree priority to mark first";
+      html = `<strong>${priorityStump ? "High-priority stump" : burnedStump ? "Charred logging stump" : "Logging stump"}</strong><span>World tile ${point.x + 1}, ${point.y + 1} · ${stumpInFastZone ? "10× zone speed · 30-minute base" : "outside zone · 5-hour base"}</span><span class="tooltip-impact">${priorityHint} · same speed as a tree here · +1 timber · becomes clearing${fireScarDetail}</span>`;
     } else if (getWaterwayType(point.x, point.y)) {
       const waterway = getWaterwayType(point.x, point.y);
       const crossing = waterway === "river" ? "River Bridge" : "Creek Footbridge";
@@ -6533,7 +6627,7 @@
     updateSelectionUi();
     if (priorityAreaStart) {
       if (dragged) prioritizeTreesInArea(priorityAreaStart, priorityAreaEnd);
-      else toggleTreePriority(priorityAreaStart.x, priorityAreaStart.y);
+      else toggleLoggingPriority(priorityAreaStart.x, priorityAreaStart.y);
     } else if (!dragged && !longPressTriggered) handleCanvasAction(event);
   }
 
@@ -7295,6 +7389,8 @@
       colour: Math.floor(seededNoise(record.id, 101, state.terrainSeed) * 4),
       targetPurpose: "wander",
       targetBuildingId: null,
+      path: [],
+      pathTargetKey: "",
       indoors: false,
       indoorBuildingId: null
     };
@@ -7330,6 +7426,7 @@
     dom.gameCanvas.dataset.villagers = String(villagers.length);
     dom.gameCanvas.dataset.villagerSpeedMultiplier = String(VILLAGER_SPEED_MULTIPLIER);
     dom.gameCanvas.dataset.villagerMovementSpeed = `${state.speed}x`;
+    dom.gameCanvas.dataset.villagerPathfinding = "breadth-first-obstacle-aware";
     dom.gameCanvas.dataset.schoolTeachers = String(state.people.filter(person => getBuildingById(person.workBuildingId)?.type === "school").length);
     dom.gameCanvas.dataset.enrolledPupils = String(state.people.filter(person => person.ageGroup === "child" && person.schoolBuildingId).length);
     dom.gameCanvas.dataset.homedVillagers = String(state.people.filter(person => getBuildingById(person.homeBuildingId)).length);
@@ -7503,6 +7600,50 @@
     }
   }
 
+  function findVillagerPath(startX, startY, targetX, targetY) {
+    const start = tileIndex(startX, startY);
+    const goal = tileIndex(targetX, targetY);
+    if (start === goal) return [];
+    const previous = new Int32Array(WORLD_SIZE * WORLD_SIZE);
+    previous.fill(-2);
+    previous[start] = -1;
+    const queue = [start];
+    let head = 0;
+    while (head < queue.length) {
+      const current = queue[head++];
+      if (current === goal) break;
+      const x = current % WORLD_SIZE;
+      const y = Math.floor(current / WORLD_SIZE);
+      for (const [nextX, nextY] of [[x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]]) {
+        if (!inWorld(nextX, nextY)) continue;
+        const next = tileIndex(nextX, nextY);
+        if (previous[next] !== -2 || !isVillagerWalkable(nextX, nextY)) continue;
+        previous[next] = current;
+        queue.push(next);
+      }
+    }
+    if (previous[goal] === -2) return [];
+    const path = [];
+    for (let current = goal; current !== start; current = previous[current]) path.push(current);
+    return path.reverse();
+  }
+
+  function getVillagerPathStep(person, target) {
+    if (!target) return null;
+    const targetKey = `${target.x},${target.y},${target.buildingId || ""},${target.purpose}`;
+    const current = tileIndex(person.tileX, person.tileY);
+    const firstStep = person.path?.[0];
+    const pathStartsHere = !Number.isInteger(firstStep)
+      || Math.abs(firstStep % WORLD_SIZE - person.tileX) + Math.abs(Math.floor(firstStep / WORLD_SIZE) - person.tileY) <= 1;
+    if (person.pathTargetKey !== targetKey || !Array.isArray(person.path) || !pathStartsHere) {
+      person.path = findVillagerPath(person.tileX, person.tileY, target.x, target.y);
+      person.pathTargetKey = targetKey;
+    }
+    while (person.path[0] === current) person.path.shift();
+    const next = person.path[0];
+    return Number.isInteger(next) ? { x: next % WORLD_SIZE, y: Math.floor(next / WORLD_SIZE) } : null;
+  }
+
   function chooseVillagerStep(person) {
     const neighbours = [
       { x: person.tileX + 1, y: person.tileY },
@@ -7521,6 +7662,8 @@
       person.nextY = person.tileY;
       person.targetPurpose = target.purpose;
       person.targetBuildingId = target.buildingId;
+      person.path = [];
+      person.pathTargetKey = "";
       person.progress = 0;
       person.steps += 1;
       const workplace = target.purpose === "work" ? getBuildingById(target.buildingId) : null;
@@ -7529,8 +7672,9 @@
         : 0.7 + seededNoise(person.id, person.steps, state.terrainSeed) * 1.6;
       return;
     }
-    const wander = target?.purpose !== "home" && seededNoise(person.id, person.steps + state.day * 11, state.terrainSeed) < 0.18;
-    const choice = wander || !target
+    const wander = target?.purpose === "wander" && seededNoise(person.id, person.steps + state.day * 11, state.terrainSeed) < 0.18;
+    const pathStep = wander ? null : getVillagerPathStep(person, target);
+    const choice = pathStep || wander || !target
       ? neighbours[Math.floor(seededNoise(person.steps, person.id * 13, state.terrainSeed) * neighbours.length) % neighbours.length]
       : neighbours.reduce((best, tile) => {
           const distance = Math.abs(tile.x - target.x) + Math.abs(tile.y - target.y);
@@ -7572,12 +7716,16 @@
         person.wait = 0;
         person.targetPurpose = "wander";
         person.targetBuildingId = null;
+        person.path = [];
+        person.pathTargetKey = "";
       }
       if (!isVillagerWalkable(person.tileX, person.tileY)) {
         const spawn = findVillagerSpawn(person.id + person.steps);
         person.tileX = person.nextX = spawn.x;
         person.tileY = person.nextY = spawn.y;
         person.progress = 0;
+        person.path = [];
+        person.pathTargetKey = "";
       }
       if (person.wait > 0) {
         person.wait -= seconds * state.speed;
@@ -8503,6 +8651,11 @@
         const stumpToggle = toggleTreePriority(tree.x, tree.y);
         priorityStumpUnaffected = stumpToggle === false && Boolean(state.priorityStumps[tree.index]);
       }
+      state.priorityStumps = {};
+      const manualStumpPriority = tree ? toggleStumpPriority(tree.x, tree.y) : false;
+      const manuallyMarkedStump = tree && Boolean(state.priorityStumps[tree.index]);
+      const manualStumpRemoval = tree ? toggleStumpPriority(tree.x, tree.y) : false;
+      const manuallyUnmarkedStump = tree && !state.priorityStumps[tree.index];
       state.loggedTrees = {};
       state.priorityStumps = {};
       state.priorityTrees = {};
@@ -8517,6 +8670,8 @@
         ["Second long-hold action removes the priority without removing the tree", secondToggle && unmarkedAfterSecondHold],
         ["Removed priority is absent from the saved game", tree && !savedUnmarkedTree.priorityTrees?.[tree.index]],
         ["Standing-tree toggle does not erase an existing priority stump", priorityStumpUnaffected],
+        ["A standing stump can be marked as priority", manualStumpPriority && manuallyMarkedStump],
+        ["A manually marked stump can be unmarked", manualStumpRemoval && manuallyUnmarkedStump],
         ["Area selection prioritizes an unmarked standing tree", areaPriority && areaMarkedTree],
         ["Selecting an already-marked area removes its priorities", repeatAreaPriority && areaRemovedTree],
         ["Canvas exposes click-and-drag priority behaviour", dom.gameCanvas.dataset.treePriorityAction?.includes("priority-tool-click-and-drag") && Boolean(dom.treePriorityTool)]
