@@ -5908,6 +5908,7 @@
 
   function updateSelectionUi() {
     document.querySelectorAll(".tool-button").forEach(button => button.classList.toggle("active", !selectedBuilding && button.dataset.tool === activeTool));
+    dom.treePriorityTool?.setAttribute("aria-pressed", String(activeTool === "tree_priority"));
     document.querySelectorAll(".build-item").forEach(button => button.classList.toggle("selected", button.dataset.building === selectedBuilding));
     if (selectedBuilding) {
       const def = BUILDINGS[selectedBuilding];
@@ -5922,6 +5923,11 @@
       dom.selectionSwatch.textContent = "⌁";
       dom.selectionSwatch.className = "selection-swatch";
       dom.gameCanvas.style.cursor = "not-allowed";
+    } else if (activeTool === "tree_priority") {
+      dom.selectionLabel.textContent = "Multi-select tree priority · click or drag";
+      dom.selectionSwatch.textContent = "⌖";
+      dom.selectionSwatch.className = "selection-swatch inspect-swatch";
+      dom.gameCanvas.style.cursor = "copy";
     } else {
       dom.selectionLabel.textContent = "Inspect tool";
       dom.selectionSwatch.textContent = "⌕";
@@ -5996,7 +6002,7 @@
     dom.gameCanvas.dataset.priorityTrees = String(getPrioritizedTrees().length);
     dom.gameCanvas.dataset.treesPrioritized = String(state.stats.treesPrioritized || 0);
     dom.gameCanvas.dataset.treesUnprioritized = String(state.stats.treesUnprioritized || 0);
-    dom.gameCanvas.dataset.treePriorityAction = "hold-to-toggle";
+    dom.gameCanvas.dataset.treePriorityAction = "hold-to-toggle-or-priority-tool-click-and-drag";
     dom.gameCanvas.dataset.priorityTreesFelled = String(state.stats.priorityTreesFelled || 0);
     dom.gameCanvas.dataset.priorityStumps = String(getPriorityStumps().length);
     dom.gameCanvas.dataset.priorityStumpsRemoved = String(state.stats.priorityStumpsRemoved || 0);
@@ -6268,6 +6274,31 @@
     return true;
   }
 
+  function prioritizeTreesInArea(start, end) {
+    const minX = clamp(Math.min(start.x, end.x), 0, WORLD_SIZE - 1);
+    const maxX = clamp(Math.max(start.x, end.x), 0, WORLD_SIZE - 1);
+    const minY = clamp(Math.min(start.y, end.y), 0, WORLD_SIZE - 1);
+    const maxY = clamp(Math.max(start.y, end.y), 0, WORLD_SIZE - 1);
+    state.priorityTrees = state.priorityTrees || {};
+    let added = 0;
+    for (let y = minY; y <= maxY; y++) {
+      for (let x = minX; x <= maxX; x++) {
+        const index = tileIndex(x, y);
+        if (isStandingTree(x, y) && !state.priorityTrees[index]) {
+          state.priorityTrees[index] = getWorldTime();
+          added++;
+        }
+      }
+    }
+    if (!added) return false;
+    state.stats.treesPrioritized = (state.stats.treesPrioritized || 0) + added;
+    showToast(`${added} tree${added === 1 ? "" : "s"} marked`, "Priority trees are harvested before every stump and automatic target.", "⌖");
+    addLog(`${added} tree${added === 1 ? " was" : "s were"} marked as priority logging targets.`);
+    saveGame();
+    renderAll();
+    return true;
+  }
+
   function beginMapGesture(event) {
     if (event.button !== 0 || !gameActive || dom.modalLayer.children.length) return;
     clearTreePriorityTimer();
@@ -6283,7 +6314,9 @@
       canvasRatioY: dom.gameCanvas.height / rect.height,
       dragging: false,
       longPressTriggered: false,
-      priorityCandidate: null
+      priorityCandidate: null,
+      priorityAreaStart: activeTool === "tree_priority" ? { x: point.x, y: point.y } : null,
+      priorityAreaEnd: activeTool === "tree_priority" ? { x: point.x, y: point.y } : null
     };
     if (!selectedBuilding && activeTool === "inspect" && isStandingTree(point.x, point.y)) {
       mapGesture.priorityCandidate = { x: point.x, y: point.y };
@@ -6301,6 +6334,11 @@
     if (mapGesture && mapGesture.pointerId === event.pointerId) {
       const dx = event.clientX - mapGesture.startX;
       const dy = event.clientY - mapGesture.startY;
+      if (activeTool === "tree_priority") {
+        mapGesture.priorityAreaEnd = canvasTileFromEvent(event);
+        mapGesture.dragging = Math.hypot(dx, dy) > 5;
+        return;
+      }
       if (Math.hypot(dx, dy) > 5) {
         mapGesture.dragging = true;
         clearTreePriorityTimer();
@@ -6463,11 +6501,16 @@
     if (!mapGesture || mapGesture.pointerId !== event.pointerId) return;
     const dragged = mapGesture.dragging;
     const longPressTriggered = mapGesture.longPressTriggered;
+    const priorityAreaStart = mapGesture.priorityAreaStart;
+    const priorityAreaEnd = mapGesture.priorityAreaEnd;
     clearTreePriorityTimer();
     mapGesture = null;
     try { dom.gameCanvas.releasePointerCapture?.(event.pointerId); } catch { /* Pointer may already be released. */ }
     updateSelectionUi();
-    if (!dragged && !longPressTriggered) handleCanvasAction(event);
+    if (priorityAreaStart) {
+      if (dragged) prioritizeTreesInArea(priorityAreaStart, priorityAreaEnd);
+      else toggleTreePriority(priorityAreaStart.x, priorityAreaStart.y);
+    } else if (!dragged && !longPressTriggered) handleCanvasAction(event);
   }
 
   function handleCanvasAction(event) {
@@ -6630,6 +6673,8 @@
       }
     }
 
+    drawTreePrioritySelection(ctx);
+
     const centre = worldToCanvas(WORLD_CENTER, WORLD_CENTER);
     ctx.strokeStyle = "rgba(183,156,102,.12)";
     ctx.lineWidth = Math.max(2, scale * 0.18);
@@ -6727,6 +6772,22 @@
     ctx.moveTo(screen.x + scale * 0.77, screen.y + scale * 0.5);
     ctx.lineTo(screen.x + scale * 0.95, screen.y + scale * 0.5);
     ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawTreePrioritySelection(ctx) {
+    if (activeTool !== "tree_priority" || !mapGesture?.priorityAreaStart || !mapGesture?.priorityAreaEnd) return;
+    const start = mapGesture.priorityAreaStart;
+    const end = mapGesture.priorityAreaEnd;
+    const topLeft = worldToCanvas(Math.min(start.x, end.x), Math.min(start.y, end.y));
+    const bottomRight = worldToCanvas(Math.max(start.x, end.x) + 1, Math.max(start.y, end.y) + 1);
+    ctx.save();
+    ctx.fillStyle = "rgba(255,193,71,.16)";
+    ctx.strokeStyle = "rgba(255,221,119,.96)";
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 4]);
+    ctx.fillRect(topLeft.x, topLeft.y, bottomRight.x - topLeft.x, bottomRight.y - topLeft.y);
+    ctx.strokeRect(topLeft.x, topLeft.y, bottomRight.x - topLeft.x, bottomRight.y - topLeft.y);
     ctx.restore();
   }
 
@@ -7765,7 +7826,7 @@
     const ids = [
       "villageName", "seasonIcon", "dayLabel", "clockLabel", "weatherLabel", "pauseButton", "achievementsButton", "achievementCount", "menuButton",
       "populationValue", "populationTrend", "foodValue", "foodTrend", "waterValue", "waterTrend", "woodValue", "woodTrend", "stoneValue", "stoneTrend", "ecosystemValue", "ecosystemTrend",
-      "buildList", "collapseBuildButton", "inspectTool", "demolishTool", "selectionSwatch", "selectionLabel", "autosaveStatus", "mapFrame", "gameCanvas", "placementGuide", "placementGuideStep", "placementGuideTitle", "placementGuideText", "placementGuideWhy", "placementGuideSpot", "placementGuideAction", "placementGuideSkip", "descriptionToggle", "tileTooltip", "mapMessage",
+      "buildList", "collapseBuildButton", "inspectTool", "demolishTool", "treePriorityTool", "selectionSwatch", "selectionLabel", "autosaveStatus", "mapFrame", "gameCanvas", "placementGuide", "placementGuideStep", "placementGuideTitle", "placementGuideText", "placementGuideWhy", "placementGuideSpot", "placementGuideAction", "placementGuideSkip", "descriptionToggle", "tileTooltip", "mapMessage",
       "zoomInButton", "zoomOutButton", "centerMapButton", "zoomLabel",
       "workersLabel", "familiesLabel", "footprintLabel", "footprintFill", "coordinatesLabel", "ecoBadge", "ecoRing", "ecoRingValue", "ecoSummary", "ecoMetrics",
       "learningProgress", "ecoCoachIcon", "ecoCoachMetric", "ecoCoachText", "ecoCoachPressure", "ecoCoachSupport", "ecoCoachConnection", "fieldGuideButton",
@@ -7796,6 +7857,7 @@
     });
     dom.inspectTool.addEventListener("click", () => setTool("inspect"));
     dom.demolishTool.addEventListener("click", () => setTool("demolish"));
+    dom.treePriorityTool.addEventListener("click", () => setTool("tree_priority"));
     dom.descriptionToggle.addEventListener("click", () => {
       state.descriptionsEnabled = state.descriptionsEnabled === false;
       dom.tileTooltip.hidden = true;
@@ -8385,6 +8447,12 @@
         const stumpToggle = toggleTreePriority(tree.x, tree.y);
         priorityStumpUnaffected = stumpToggle === false && Boolean(state.priorityStumps[tree.index]);
       }
+      state.loggedTrees = {};
+      state.priorityStumps = {};
+      state.priorityTrees = {};
+      const areaPriority = tree ? prioritizeTreesInArea(tree, tree) : false;
+      const areaMarkedTree = tree && Boolean(state.priorityTrees[tree.index]);
+      const repeatAreaPriority = tree ? prioritizeTreesInArea(tree, tree) : false;
       renderAll();
       const checks = [
         ["First long-hold action prioritizes a standing tree", firstToggle && markedAfterFirstHold],
@@ -8392,7 +8460,9 @@
         ["Second long-hold action removes the priority without removing the tree", secondToggle && unmarkedAfterSecondHold],
         ["Removed priority is absent from the saved game", tree && !savedUnmarkedTree.priorityTrees?.[tree.index]],
         ["Standing-tree toggle does not erase an existing priority stump", priorityStumpUnaffected],
-        ["Canvas exposes hold-to-toggle behaviour", dom.gameCanvas.dataset.treePriorityAction === "hold-to-toggle" && dom.gameCanvas.dataset.treesUnprioritized === "1"]
+        ["Area selection prioritizes an unmarked standing tree", areaPriority && areaMarkedTree],
+        ["Area selection never removes an existing priority", repeatAreaPriority === false && areaMarkedTree],
+        ["Canvas exposes click-and-drag priority behaviour", dom.gameCanvas.dataset.treePriorityAction?.includes("priority-tool-click-and-drag") && Boolean(dom.treePriorityTool)]
       ];
       const passed = checks.every(([, pass]) => pass);
       const result = document.createElement("pre");
