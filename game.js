@@ -182,6 +182,22 @@
       buildEco: { soil: -0.32, biodiversity: -0.08 },
       dailyEco: { air: -0.015 }
     },
+    barn: {
+      id: "barn",
+      name: "Farm Barn",
+      short: "▤",
+      category: "industry",
+      description: "A 2 × 2 food-only store beside a Field Farm. Holds 500 food and puts steady pressure on the soil.",
+      cost: { wood: 20, stone: 6 },
+      size: { w: 2, h: 2 },
+      jobs: 0,
+      storageByResource: { food: 500 },
+      requiresAdjacentType: "farm",
+      impact: "medium",
+      impactLabel: "Soil pressure",
+      buildEco: { soil: -0.25 },
+      dailyEco: { soil: -0.05 }
+    },
     creek_bridge: {
       id: "creek_bridge",
       name: "Creek Footbridge",
@@ -1730,6 +1746,16 @@
     return false;
   }
 
+  function touchesBuildingTypeForState(target, originX, originY, size, requiredType) {
+    return (target.buildings || []).some(building => {
+      if (building.type !== requiredType) return false;
+      const horizontalOverlap = originX < building.x + building.w && originX + size.w > building.x;
+      const verticalOverlap = originY < building.y + building.h && originY + size.h > building.y;
+      return (horizontalOverlap && (originY + size.h === building.y || building.y + building.h === originY))
+        || (verticalOverlap && (originX + size.w === building.x || building.x + building.w === originX));
+    });
+  }
+
   function canOccupyOnState(target, type, originX, originY, rotation = 0) {
     const bridgeStatus = getBridgePlacementStatusForState(target, type, originX, originY, rotation);
     if (bridgeStatus) return bridgeStatus.valid;
@@ -1743,7 +1769,9 @@
         if (target.occupancy[tileIndex(x, y)]) return false;
       }
     }
-    return !BUILDINGS[type]?.waterIntake || touchesWaterwayForState(target, originX, originY, size);
+    const def = BUILDINGS[type];
+    if (def?.waterIntake && !touchesWaterwayForState(target, originX, originY, size)) return false;
+    return !def?.requiresAdjacentType || touchesBuildingTypeForState(target, originX, originY, size, def.requiresAdjacentType);
   }
 
   function addBuildingToState(target, type, originX, originY, builtDay, id, rotation = 0) {
@@ -4705,6 +4733,9 @@
     if (BUILDINGS[type]?.waterIntake && !touchesWaterwayForState(state, originX, originY, size)) {
       return { valid: false, reason: "The River Pump must sit on cleared land beside a creek or river." };
     }
+    if (BUILDINGS[type]?.requiresAdjacentType && !touchesBuildingTypeForState(state, originX, originY, size, BUILDINGS[type].requiresAdjacentType)) {
+      return { valid: false, reason: "A Farm Barn must share an edge with a Field Farm." };
+    }
     return { valid: true, reason: "" };
   }
 
@@ -4911,8 +4942,12 @@
           : "No active wellbeing loss";
       contextRows.push(`<div class="inspection-row"><span>Residential noise</span><strong>${homeNoise.sourcesInRange} source${homeNoise.sourcesInRange === 1 ? "" : "s"} within their active noise zones · ${sourceStatus} · ${exposureText}</strong></div>`);
     }
-    if (def.storage) {
-      contextRows.push(`<div class="inspection-row"><span>Resource storage</span><strong>${def.storage} food, water, timber and stone each · village total ${getStorageCapacity("wood")} each</strong></div>`);
+    if (def.storage || def.storageByResource) {
+      const storedResources = def.storage
+        ? `${def.storage} food, water, timber and stone each`
+        : Object.entries(def.storageByResource).map(([resource, amount]) => `${amount} ${resource} only`).join(" · ");
+      const storageTotal = def.storage ? `${getStorageCapacity("wood")} each` : `${getStorageCapacity("food")} food`;
+      contextRows.push(`<div class="inspection-row"><span>Resource storage</span><strong>${storedResources} · village total ${storageTotal}</strong></div>`);
     }
     if (["lumber", "quarry"].includes(building.type)) {
       contextRows.push(`<div class="inspection-row"><span>Producer overlap</span><strong>No penalty · timber and stone sites do not suppress one another</strong></div>`);
@@ -5077,6 +5112,7 @@
       hearth: "12 housing and 400 storage for each resource",
       cottage: "6 housing",
       storage: "+200 food, water, timber and stone capacity",
+      barn: "+500 food-only capacity beside a Field Farm",
       creek_bridge: "A walkable crossing over one creek tile without filling the channel",
       river_bridge: "A walkable crossing over three river tiles without filling the channel",
       farm: "About 25 food/day with two farmers; up to 50/day with three before season, soil and nearby pollution",
@@ -5125,7 +5161,9 @@
     if (["sanctuary", "park", "playground"].includes(type)) return "Green spaces provide habitat, cooling and wellbeing. Connected and varied spaces protect more life than isolated patches.";
     if (type === "windmill") return "Cleaner technology can raise output without fuel combustion, although construction, land use and low mechanical noise still matter. A housing buffer protects residents while keeping the clean-energy benefit.";
     if (BUILDINGS[type]?.pollution || BUILDINGS[type]?.noise) return "Pollution has local consequences. Separating fumes and noise from crops, forest edges and occupied homes is practical environmental zoning; quieter equipment and prevention at the source are stronger still.";
-    if (["storage", "granary"].includes(type)) return "Storage reduces waste and improves resilience, but it cannot create resources or remove the impacts of producing them.";
+    if (["storage", "granary", "barn"].includes(type)) return type === "barn"
+      ? "A barn can protect a farm harvest from overflowing, but it must sit beside its Field Farm and its footprint still puts pressure on living soil."
+      : "Storage reduces waste and improves resilience, but it cannot create resources or remove the impacts of producing them.";
     if (["hearth", "cottage", "townhouse"].includes(type)) {
       const noise = getHousingNoiseInfo(building);
       return noise.sourcesInRange
@@ -6612,6 +6650,7 @@
       if (building.type === "wood_farm") localDetail = `${getMatureWoodFarmPlots(building).length}/${WOOD_FARM_PLOTS} trees mature · ${TREE_TIMBER_MIN}–${TREE_TIMBER_MAX} timber each · ${localDetail}`;
       if (def.bridge) localDetail = `${def.bridge === "river" ? "Three river tiles" : "One creek tile"} spanned · every deck tile walkable · channel remains open · ${localDetail}`;
       if (def.storage) localDetail = `${def.storage} capacity for each resource · ${localDetail}`;
+      if (def.storageByResource) localDetail = `${Object.entries(def.storageByResource).map(([resource, amount]) => `${amount} ${resource} only`).join(" · ")} · ${localDetail}`;
       if (["farm", "orchard"].includes(building.type)) localDetail = `${Math.round(getCropPollutionInfo(building).penalty * 100)}% output lost to nearby pollution · ${localDetail}`;
       if (def.pollution) localDetail = `${getForestPollutionInfo(building).trees} forest trees exposed to pollution · ${localDetail}`;
       if (def.noise) {
@@ -7218,33 +7257,33 @@
         ctx.shadowColor = "transparent";
         normaliseWoodFarmPlots(building, state);
         ctx.fillStyle = "rgba(90,77,42,.42)";
-        ctx.fillRect(-10, -9, 20, 19);
+        ctx.fillRect(-10, -10, 20, 20);
         ctx.strokeStyle = "rgba(194,166,91,.48)";
         ctx.lineWidth = 0.45;
         for (let line = -5; line <= 5; line += 5) {
-          ctx.beginPath(); ctx.moveTo(line, -9); ctx.lineTo(line, 10); ctx.moveTo(-10, line + 0.5); ctx.lineTo(10, line + 0.5); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(line, -10); ctx.lineTo(line, 10); ctx.moveTo(-10, line); ctx.lineTo(10, line); ctx.stroke();
         }
         for (let row = 0; row < 4; row++) {
           for (let column = 0; column < 4; column++) {
             const index = row * 4 + column;
             const growth = clamp(getWoodFarmPlotAge(building, index) / WOOD_FARM_GROWTH_DAYS, 0, 1);
             const treeX = -7.5 + column * 5;
-            const treeY = -4.5 + row * 4.3;
-            const plotEvergreen = isEvergreenTree(Math.round(treeX * 19), Math.round((treeY + 1.5) * 23));
+            const treeY = -7.5 + row * 5;
+            const plotEvergreen = isEvergreenTree(Math.round(treeX * 19), Math.round(treeY * 23));
             const plotLeafAmount = plotEvergreen ? 1 : getDeciduousCanopyProgress();
             if (growth < 0.16) {
               ctx.strokeStyle = "#567846";
               ctx.lineWidth = 0.7;
-              ctx.beginPath(); ctx.moveTo(treeX, treeY + 1.5); ctx.lineTo(treeX, treeY - 1.3); ctx.stroke();
+              ctx.beginPath(); ctx.moveTo(treeX, treeY); ctx.lineTo(treeX, treeY - 2.8); ctx.stroke();
               if (plotLeafAmount > 0.001) {
                 ctx.save();
                 ctx.globalAlpha = plotLeafAmount;
                 ctx.fillStyle = plotEvergreen ? "#347848" : "#6c9957";
-                ctx.beginPath(); ctx.ellipse(treeX - 0.8, treeY - 1.1, 1.1, 0.55, -0.45, 0, Math.PI * 2); ctx.ellipse(treeX + 0.8, treeY - 0.4, 1.1, 0.55, 0.45, 0, Math.PI * 2); ctx.fill();
+                ctx.beginPath(); ctx.ellipse(treeX - 0.8, treeY - 2.6, 1.1, 0.55, -0.45, 0, Math.PI * 2); ctx.ellipse(treeX + 0.8, treeY - 1.9, 1.1, 0.55, 0.45, 0, Math.PI * 2); ctx.fill();
                 ctx.restore();
               }
             } else {
-              drawTree(ctx, treeX, treeY + 1.5, 0.11 + growth * 0.16, getSeason().id, 0.78 + growth * 0.22);
+              drawTree(ctx, treeX, treeY, 0.11 + growth * 0.16, getSeason().id, 0.78 + growth * 0.22);
             }
           }
         }
@@ -7303,6 +7342,13 @@
         break;
       case "granary":
         house("#b69b6c", "#5c4030"); ctx.fillStyle="#6f7a67";ctx.beginPath();ctx.ellipse(9,2,5,8,0,0,Math.PI*2);ctx.fill();ctx.fillStyle="#4f5b50";ctx.fillRect(5,1,8,8);
+        break;
+      case "barn":
+        house("#a66f45", "#593b2a");
+        ctx.fillStyle = "#d2b86d"; ctx.fillRect(-8, -1, 16, 9);
+        ctx.strokeStyle = "#6d482e"; ctx.lineWidth = 1.4;
+        for (let x = -6; x <= 6; x += 4) { ctx.beginPath(); ctx.moveTo(x, -1); ctx.lineTo(x, 8); ctx.stroke(); }
+        ctx.fillStyle = "#4d3527"; ctx.fillRect(-3, 2, 6, 6);
         break;
       case "reservoir":
         ctx.fillStyle="#777f76";ctx.beginPath();ctx.ellipse(0,0,11,8,0,0,Math.PI*2);ctx.fill();ctx.fillStyle="#477988";ctx.beginPath();ctx.ellipse(0,-1,8.5,5.5,0,0,Math.PI*2);ctx.fill();

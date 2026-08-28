@@ -15,9 +15,11 @@ Checked 29 August 2026 after priority logging, villager movement, and seasonal-w
 - **Priority control skipped existing stumps.** Stumps can now be marked or unmarked through the same long-hold and Tree priority controls, with remote stumps assigned to the nearest Logging Camp.
 - **Priority stumps could wait behind priority trees.** The logging queue now processes priority stumps first, then priority trees, then ordinary stumps and automatic tree targets.
 - **Several Logging Camps could duplicate a remote priority job.** Each staffed camp now chooses its nearest marked tree or stump; camps that choose the same outside-zone target combine their assigned workers on one progress bar. Every logger supplies 0.5× standard two-worker speed, so four workers take a five-hour outside job in 2.5 hours and six take about 1 hour 40 minutes.
+- **Wood Farm trees could drift out of their plot centres while growing.** The 4 × 4 field grid and every seedling/tree now use the same evenly spaced centre coordinates.
 
 ## Remaining risks to monitor
 
+- **Farm Barn placement:** A Farm Barn must share a side—not merely a corner—with a Field Farm. The placement preview and placement validation use the same rule; custom or edited saves can still contain an older invalid layout.
 - **Aggregate birth model:** The growth rate is village-wide rather than based on a specific adult household. This is intentional for a lightweight simulation, but it can produce a birth in a village with no adult residents if a custom save or event creates that state.
 - **Very large manual time jumps:** Normal play limits each simulation update to 250 ms, but unusually large time jumps (for example, a developer tool or a future offline-progress feature) calculate wellbeing and population conditions only at the start of the jump. Such a jump should be processed in small slices.
 - **Custom/edited saves:** Invalid or manually edited save data can still cause unusual demographic mixes. The game repairs missing lifecycle fields and now repairs missing birth-progress data, but it cannot infer a player’s intended population history.

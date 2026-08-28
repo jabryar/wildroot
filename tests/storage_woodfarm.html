@@ -35,9 +35,10 @@
     buildings: [
       { type: "hearth", x: 49, y: 49, rotation: 0, builtDay: 1, id: 1 },
       { type: "lumber", x: 38, y: 48, rotation: 0, builtDay: 4, id: 2, loggingProgress: 0, stumpProgress: 0 },
-      { type: "wood_farm", x: 44, y: 47, rotation: 0, builtDay: 5, id: 3, woodFarmPlots: Array(16).fill(5.1) }
+      { type: "wood_farm", x: 44, y: 47, rotation: 0, builtDay: 5, id: 3, woodFarmPlots: Array(16).fill(5.1) },
+      { type: "farm", x: 42, y: 54, rotation: 0, builtDay: 5, id: 4 }
     ],
-    nextBuildingId: 4,
+    nextBuildingId: 5,
     loggedTrees: {},
     clearedTiles,
     camera: { x: 50, y: 50, zoom: .85 }
@@ -79,6 +80,16 @@
       clickWorld(win, canvas, 45.5, 53.5);
       await wait(450);
       check("Storehouse adds 200 capacity to every resource", ["Food", "Water", "Wood", "Stone"].every(resource => canvas.dataset[`storageCapacity${resource}`] === "600"), `${canvas.dataset.storageCapacityFood}/${canvas.dataset.storageCapacityWater}/${canvas.dataset.storageCapacityWood}/${canvas.dataset.storageCapacityStone}`);
+
+      check("Farm Barn is a 2x2 building", doc.querySelector('[data-building="barn"] .size-chip')?.textContent === "2×2", doc.querySelector('[data-building="barn"] .size-chip')?.textContent || "missing");
+      doc.querySelector('[data-building="barn"]').click();
+      const beforeInvalidBarn = canvas.dataset.buildingCount;
+      clickWorld(win, canvas, 32.5, 55.5);
+      await wait(250);
+      check("Farm Barn cannot be placed away from a Field Farm", canvas.dataset.buildingCount === beforeInvalidBarn && doc.getElementById("mapMessage").textContent.includes("share an edge"), `${canvas.dataset.buildingCount} buildings · ${doc.getElementById("mapMessage").textContent}`);
+      clickWorld(win, canvas, 41.5, 55.5);
+      await wait(450);
+      check("Farm Barn beside a Field Farm adds 500 food-only storage", canvas.dataset.storageCapacityFood === "1100" && ["Water", "Wood", "Stone"].every(resource => canvas.dataset[`storageCapacity${resource}`] === "600"), `${canvas.dataset.storageCapacityFood}/${canvas.dataset.storageCapacityWater}/${canvas.dataset.storageCapacityWood}/${canvas.dataset.storageCapacityStone}`);
 
       check("Wood Farm owns sixteen tracked plots", canvas.dataset.woodFarmPlots === "16", canvas.dataset.woodFarmPlots);
       const renewableBeforeWild = win.__wildrootTest.loggingTargetOrder(false, true, true);
