@@ -5924,7 +5924,7 @@
       dom.selectionSwatch.className = "selection-swatch";
       dom.gameCanvas.style.cursor = "not-allowed";
     } else if (activeTool === "tree_priority") {
-      dom.selectionLabel.textContent = "Multi-select tree priority · click or drag";
+      dom.selectionLabel.textContent = "Multi-select tree priority · click or drag to mark/remove";
       dom.selectionSwatch.textContent = "⌖";
       dom.selectionSwatch.className = "selection-swatch inspect-swatch";
       dom.gameCanvas.style.cursor = "copy";
@@ -6002,7 +6002,7 @@
     dom.gameCanvas.dataset.priorityTrees = String(getPrioritizedTrees().length);
     dom.gameCanvas.dataset.treesPrioritized = String(state.stats.treesPrioritized || 0);
     dom.gameCanvas.dataset.treesUnprioritized = String(state.stats.treesUnprioritized || 0);
-    dom.gameCanvas.dataset.treePriorityAction = "hold-to-toggle-or-priority-tool-click-and-drag";
+    dom.gameCanvas.dataset.treePriorityAction = "hold-to-toggle-or-priority-tool-click-and-drag-to-mark-or-remove";
     dom.gameCanvas.dataset.priorityTreesFelled = String(state.stats.priorityTreesFelled || 0);
     dom.gameCanvas.dataset.priorityStumps = String(getPriorityStumps().length);
     dom.gameCanvas.dataset.priorityStumpsRemoved = String(state.stats.priorityStumpsRemoved || 0);
@@ -6280,20 +6280,27 @@
     const minY = clamp(Math.min(start.y, end.y), 0, WORLD_SIZE - 1);
     const maxY = clamp(Math.max(start.y, end.y), 0, WORLD_SIZE - 1);
     state.priorityTrees = state.priorityTrees || {};
-    let added = 0;
+    const trees = [];
     for (let y = minY; y <= maxY; y++) {
       for (let x = minX; x <= maxX; x++) {
         const index = tileIndex(x, y);
-        if (isStandingTree(x, y) && !state.priorityTrees[index]) {
-          state.priorityTrees[index] = getWorldTime();
-          added++;
-        }
+        if (isStandingTree(x, y)) trees.push(index);
       }
     }
-    if (!added) return false;
-    state.stats.treesPrioritized = (state.stats.treesPrioritized || 0) + added;
-    showToast(`${added} tree${added === 1 ? "" : "s"} marked`, "Priority trees are harvested before every stump and automatic target.", "⌖");
-    addLog(`${added} tree${added === 1 ? " was" : "s were"} marked as priority logging targets.`);
+    if (!trees.length) return false;
+    const removing = trees.every(index => Boolean(state.priorityTrees[index]));
+    if (removing) {
+      trees.forEach(index => delete state.priorityTrees[index]);
+      state.stats.treesUnprioritized = (state.stats.treesUnprioritized || 0) + trees.length;
+      showToast(`${trees.length} tree${trees.length === 1 ? "" : "s"} unmarked`, "Loggers will return to their normal queue for these trees.", "○");
+      addLog(`${trees.length} tree${trees.length === 1 ? " priority was" : " priorities were"} removed.`);
+    } else {
+      const added = trees.filter(index => !state.priorityTrees[index]);
+      added.forEach(index => { state.priorityTrees[index] = getWorldTime(); });
+      state.stats.treesPrioritized = (state.stats.treesPrioritized || 0) + added.length;
+      showToast(`${added.length} tree${added.length === 1 ? "" : "s"} marked`, "Priority trees are harvested before every stump and automatic target.", "⌖");
+      addLog(`${added.length} tree${added.length === 1 ? " was" : "s were"} marked as priority logging targets.`);
+    }
     saveGame();
     renderAll();
     return true;
@@ -8453,6 +8460,7 @@
       const areaPriority = tree ? prioritizeTreesInArea(tree, tree) : false;
       const areaMarkedTree = tree && Boolean(state.priorityTrees[tree.index]);
       const repeatAreaPriority = tree ? prioritizeTreesInArea(tree, tree) : false;
+      const areaRemovedTree = tree && !state.priorityTrees[tree.index];
       renderAll();
       const checks = [
         ["First long-hold action prioritizes a standing tree", firstToggle && markedAfterFirstHold],
@@ -8461,7 +8469,7 @@
         ["Removed priority is absent from the saved game", tree && !savedUnmarkedTree.priorityTrees?.[tree.index]],
         ["Standing-tree toggle does not erase an existing priority stump", priorityStumpUnaffected],
         ["Area selection prioritizes an unmarked standing tree", areaPriority && areaMarkedTree],
-        ["Area selection never removes an existing priority", repeatAreaPriority === false && areaMarkedTree],
+        ["Selecting an already-marked area removes its priorities", repeatAreaPriority && areaRemovedTree],
         ["Canvas exposes click-and-drag priority behaviour", dom.gameCanvas.dataset.treePriorityAction?.includes("priority-tool-click-and-drag") && Boolean(dom.treePriorityTool)]
       ];
       const passed = checks.every(([, pass]) => pass);

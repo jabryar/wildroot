@@ -13,7 +13,7 @@ Checked 28 August 2026 after adding multi-select tree priority.
 - **Aggregate birth model:** The growth rate is village-wide rather than based on a specific adult household. This is intentional for a lightweight simulation, but it can produce a birth in a village with no adult residents if a custom save or event creates that state.
 - **Very large manual time jumps:** Normal play limits each simulation update to 250 ms, but unusually large time jumps (for example, a developer tool or a future offline-progress feature) calculate wellbeing and population conditions only at the start of the jump. Such a jump should be processed in small slices.
 - **Custom/edited saves:** Invalid or manually edited save data can still cause unusual demographic mixes. The game repairs missing lifecycle fields and now repairs missing birth-progress data, but it cannot infer a player’s intended population history.
-- **Large tree-priority selections:** Dragging across a very large forest area marks every standing tree in that rectangle. This is intentional, but players should use small areas when they only mean to redirect one logging crew.
+- **Large tree-priority selections:** Dragging across a very large forest area marks every standing tree in that rectangle; dragging an area where every tree is already marked removes those priorities. This is intentional, but players should use small areas when they only mean to redirect one logging crew.
 
 ## Verification
 
