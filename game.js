@@ -3579,7 +3579,7 @@
           rates.food += 16 * active * wildlifeFactor * marketBoost;
           break;
         case "quarry":
-          rates.stone += 15.5 * active * marketBoost;
+          rates.stone += 31 * active * marketBoost;
           break;
         case "forester":
           rates.wood += 8.5 * active * weather.wood * forestFactor * marketBoost;
@@ -4948,7 +4948,7 @@
       lumber: "A five-hour outside-zone base felling time with a full crew, 10× speed inside the zone, matching stump speed, 5–10 timber from healthy trees, 30% less from fire-damaged trees, and a full-storage pause unless manually overridden",
       wood_farm: "16 managed tree plots; each supplies 5–10 timber and regrows in 5 days",
       hunter: "About 16 food/day before wildlife health",
-      quarry: "About 15.5 stone/day",
+      quarry: "About 31 stone/day",
       forester: "About 8.5 timber/day plus forest restoration",
       sanctuary: "Ecosystem restoration",
       orchard: "About 15 food/day plus habitat",
