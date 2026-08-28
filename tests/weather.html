@@ -75,6 +75,11 @@
       check("adjacent farms do not pollute each other", canvas.dataset.cropPollutionLoss === "0", `${canvas.dataset.cropPollutionLoss}% output loss`);
       check("adjacent timber and stone sites do not suppress output", canvas.dataset.rawProducerPollutionLoss === "0", `${canvas.dataset.rawProducerPollutionLoss}% output loss`);
       const summerFadeStart = win.__wildrootTest.autumnProgress(22, 0);
+      const springShift = win.__wildrootTest.staffedShift(6);
+      const summerShift = win.__wildrootTest.staffedShift(15);
+      const autumnShift = win.__wildrootTest.staffedShift(27);
+      const winterShift = win.__wildrootTest.staffedShift(38);
+      check("staffed hours follow the seasons", springShift.end === 18.5 && summerShift.end === 20.5 && autumnShift.end === 18.5 && winterShift.end === 17.5 && summerShift.fraction > springShift.fraction && winterShift.fraction < springShift.fraction, `${springShift.end}/${summerShift.end}/${autumnShift.end}/${winterShift.end}`);
       const autumnDayOne = win.__wildrootTest.autumnProgress(25, 0);
       const autumnFadeEnd = win.__wildrootTest.autumnProgress(27, 0);
       check("autumn colour fade spans summer’s last three and autumn’s first two days", summerFadeStart === 0 && Math.abs(autumnDayOne - .6) < .0001 && autumnFadeEnd === 1 && canvas.dataset.autumnTransitionDays === "5", `${summerFadeStart} → ${autumnDayOne} → ${autumnFadeEnd}`);

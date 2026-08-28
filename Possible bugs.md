@@ -1,6 +1,6 @@
 # Possible bugs
 
-Checked 28 August 2026 after adding multi-select tree priority.
+Checked 29 August 2026 after priority logging, villager movement, and seasonal-work updates.
 
 ## Fixed
 
@@ -10,8 +10,11 @@ Checked 28 August 2026 after adding multi-select tree priority.
 - **Children could be enrolled in an unstaffed school.** School seats now become available only while at least one teacher is assigned, so pupils travel to a functioning school rather than an empty building.
 - **Villager travel did not match the time control exactly.** Movement now scales directly with 1×, 2× or 3×, including pauses between work steps. Farmers also remain in their assigned fields and visibly work there instead of immediately beginning a delivery trip.
 - **Citizens could stall at waterways or building edges.** Their destination routing now uses obstacle-aware breadth-first paths instead of a purely greedy next-tile choice.
+- **Farmers and pupils could target non-walkable building icon tiles.** Farm work now selects only walkable field tiles, while pupils route inside staffed schools and remain there through school hours.
+- **Staffed work used the same daylight window in every season.** Work, production forecasts, school attendance and day/night diagnostics now use the seasonal shift: 07:00–20:30 in summer, 07:00–17:30 in winter, and 07:00–18:30 otherwise.
 - **Priority control skipped existing stumps.** Stumps can now be marked or unmarked through the same long-hold and Tree priority controls, with remote stumps assigned to the nearest Logging Camp.
 - **Priority stumps could wait behind priority trees.** The logging queue now processes priority stumps first, then priority trees, then ordinary stumps and automatic tree targets.
+- **Several Logging Camps could duplicate a remote priority job.** Each staffed camp now chooses its nearest marked tree or stump; camps that choose the same outside-zone target combine their assigned workers on one progress bar. Every logger supplies 0.5× standard two-worker speed, so four workers take a five-hour outside job in 2.5 hours and six take about 1 hour 40 minutes.
 
 ## Remaining risks to monitor
 

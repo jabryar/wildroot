@@ -15,8 +15,7 @@
   const EVERGREEN_TREE_SHARE = 0.1;
   const SEASONAL_LEAF_FADE_DAYS = 3;
   const STAFFED_SHIFT_START_HOUR = 7;
-  const STAFFED_SHIFT_END_HOUR = 18.5;
-  const STAFFED_SHIFT_DAY_FRACTION = (STAFFED_SHIFT_END_HOUR - STAFFED_SHIFT_START_HOUR) / 24;
+  const STAFFED_SHIFT_STANDARD_END_HOUR = 18.5;
   const RESIDENT_LIFESPAN_MIN_DAYS = 40;
   const RESIDENT_LIFESPAN_MAX_DAYS = 60;
   const TRAVELLER_LIFESPAN_MIN_DAYS = 20;
@@ -1867,6 +1866,27 @@
     return SEASONS[Math.floor((day - 1) / SEASON_LENGTH) % SEASONS.length];
   }
 
+  function getStaffedShiftEndHour(target = state) {
+    const season = getSeason(Math.floor(Number(target?.day) || 1));
+    if (season.id === "summer") return STAFFED_SHIFT_STANDARD_END_HOUR + 2;
+    if (season.id === "winter") return STAFFED_SHIFT_STANDARD_END_HOUR - 1;
+    return STAFFED_SHIFT_STANDARD_END_HOUR;
+  }
+
+  function getStaffedShiftDayFraction(target = state) {
+    return (getStaffedShiftEndHour(target) - STAFFED_SHIFT_START_HOUR) / 24;
+  }
+
+  function formatVillageTime(hour) {
+    const wholeHours = Math.floor(hour);
+    const minutes = Math.round((hour - wholeHours) * 60);
+    return `${String(wholeHours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+  }
+
+  function getStaffedShiftLabel(target = state) {
+    return `${formatVillageTime(STAFFED_SHIFT_START_HOUR)}–${formatVillageTime(getStaffedShiftEndHour(target))}`;
+  }
+
   function areWaterwaysFrozen(target = state) {
     return getSeason(Number(target?.day) || 1).id === "winter";
   }
@@ -2964,7 +2984,7 @@
         inRange: isTreeInLoggingRange(building, tree.x, tree.y),
         distance: (tree.x + 0.5 - centreX) ** 2 + (tree.y + 0.5 - centreY) ** 2
       }))
-      .sort((a, b) => a.prioritizedAt - b.prioritizedAt || a.distance - b.distance)[0] || null;
+      .sort((a, b) => a.distance - b.distance || a.prioritizedAt - b.prioritizedAt || a.index - b.index)[0] || null;
   }
 
   function getLoggingStumpsInRange(building, target = state) {
@@ -3013,7 +3033,9 @@
     for (const stump of [...getLoggingStumpsInRange(building, target), ...getRemoteLoggingStumps(building, target)]) byIndex.set(stump.index, stump);
     return [...byIndex.values()].sort((a, b) => {
       const ageDifference = Number(target.loggedTrees?.[a.index] || 0) - Number(target.loggedTrees?.[b.index] || 0);
-      return Number(b.priority) - Number(a.priority) || Number(a.remote) - Number(b.remote) || ageDifference || a.distance - b.distance;
+      if (Number(b.priority) !== Number(a.priority)) return Number(b.priority) - Number(a.priority);
+      if (a.priority) return a.distance - b.distance || a.index - b.index;
+      return Number(a.remote) - Number(b.remote) || ageDifference || a.distance - b.distance;
     });
   }
 
@@ -3030,6 +3052,19 @@
       stumps.push({ index, x, y, campId: Number(target.priorityStumps[rawIndex]) || null });
       return stumps;
     }, []);
+  }
+
+  function getPriorityStumpForCamp(building, target = state) {
+    if (!building || building.type !== "lumber") return null;
+    const centreX = building.x + building.w / 2;
+    const centreY = building.y + building.h / 2;
+    return getPriorityStumps(target)
+      .map(stump => ({
+        ...stump,
+        inRange: isTreeInLoggingRange(building, stump.x, stump.y),
+        distance: (stump.x + 0.5 - centreX) ** 2 + (stump.y + 0.5 - centreY) ** 2
+      }))
+      .sort((a, b) => a.distance - b.distance || a.index - b.index)[0] || null;
   }
 
   function getWoodFarmPlotAge(building, plotIndex, target = state) {
@@ -3224,7 +3259,8 @@
     if (staffedProductionActive === null) {
       const day = getNoiseOperationFactor(building, target, true);
       const night = getNoiseOperationFactor(building, target, false);
-      return day * STAFFED_SHIFT_DAY_FRACTION + night * (1 - STAFFED_SHIFT_DAY_FRACTION);
+      const dayFraction = getStaffedShiftDayFraction(target);
+      return day * dayFraction + night * (1 - dayFraction);
     }
     return getNoiseOperationFactor(building, target, Boolean(staffedProductionActive));
   }
@@ -3344,21 +3380,52 @@
     state.remoteStumps = state.remoteStumps || {};
     state.clearedTiles = state.clearedTiles || {};
     if (isVillagerNight()) return;
-    for (const building of state.buildings.filter(item => item.type === "lumber")) {
+    const activeCamps = state.buildings.filter(item => item.type === "lumber" && getAssignedWorkers(item.id) > 0 && !isLoggingStorageBlocked(item));
+    const outsidePriorityGroups = new Map();
+    for (const camp of activeCamps) {
+      const stump = getPriorityStumpForCamp(camp);
+      const tree = stump ? null : getPriorityTreeForCamp(camp);
+      const target = stump || tree;
+      if (!target || target.inRange) continue;
+      const key = `${stump ? "stump" : "tree"}:${target.index}`;
+      if (!outsidePriorityGroups.has(key)) outsidePriorityGroups.set(key, []);
+      outsidePriorityGroups.get(key).push(camp);
+    }
+    for (const building of activeCamps) {
       const assigned = getAssignedWorkers(building.id);
-      if (!assigned || isLoggingStorageBlocked(building)) continue;
       const waitingStumps = getLoggingWorkStumps(building);
+      const priorityStump = getPriorityStumpForCamp(building);
       const loggingTarget = getLoggingTarget(building);
       // A manually marked stump is the most urgent clearing work; marked trees still outrank ordinary stumps.
-      const priorityStumpActive = Boolean(waitingStumps[0]?.priority);
+      const priorityStumpActive = Boolean(priorityStump);
       const priorityTreeActive = Boolean(loggingTarget?.priority) && !priorityStumpActive;
+      const activeStump = priorityStump || waitingStumps[0] || null;
+      const outsidePriorityTarget = priorityStumpActive && !priorityStump.inRange
+        ? `stump:${priorityStump.index}`
+        : priorityTreeActive && !loggingTarget.inRange
+          ? `tree:${loggingTarget.index}`
+          : null;
+      const sharedCamps = outsidePriorityTarget ? outsidePriorityGroups.get(outsidePriorityTarget) || [building] : [building];
+      // One camp owns the shared progress bar. The others contribute their
+      // assigned workers, so no partly completed work is carried to a new job.
+      if (sharedCamps[0]?.id !== building.id) {
+        building.stumpProgress = 0;
+        building.loggingProgress = 0;
+        continue;
+      }
+      // Logging rates are calibrated for two workers. This makes every logger
+      // worth half of that standard crew, including when several camps join a
+      // marked target outside their zones.
+      const sharedWorkerMultiplier = sharedCamps.reduce((total, camp) => total + getAssignedWorkers(camp.id), 0) / assigned;
       const stumpWorkers = priorityStumpActive || (!priorityTreeActive && waitingStumps.length) ? assigned : 0;
       const fellers = !priorityStumpActive && (priorityTreeActive || !waitingStumps.length) ? assigned : 0;
-      building.stumpProgress = Math.max(0, Number(building.stumpProgress) || 0) + deltaDays * (stumpWorkers > 0 ? getLoggingStumpRate(building, waitingStumps[0]) : 0);
-      building.loggingProgress = Math.max(0, Number(building.loggingProgress) || 0) + deltaDays * (fellers > 0 ? getLoggingFellingRate(building, loggingTarget) : 0);
+      building.stumpProgress = Math.max(0, Number(building.stumpProgress) || 0) + deltaDays * (stumpWorkers > 0 ? getLoggingStumpRate(building, activeStump) * sharedWorkerMultiplier : 0);
+      building.loggingProgress = Math.max(0, Number(building.loggingProgress) || 0) + deltaDays * (fellers > 0 ? getLoggingFellingRate(building, loggingTarget) * sharedWorkerMultiplier : 0);
 
       while (stumpWorkers > 0 && building.stumpProgress >= 1) {
-        const stump = getLoggingWorkStumps(building)[0];
+        const stump = priorityStump && state.loggedTrees?.[priorityStump.index]
+          ? priorityStump
+          : getLoggingWorkStumps(building)[0];
         if (!stump) {
           building.stumpProgress = 0;
           break;
@@ -3658,10 +3725,11 @@
   function getDailyAverageProductionRates() {
     const dayRates = getProductionRates(true);
     const nightRates = getProductionRates(false);
-    const nightFraction = 1 - STAFFED_SHIFT_DAY_FRACTION;
+    const dayFraction = getStaffedShiftDayFraction();
+    const nightFraction = 1 - dayFraction;
     return Object.fromEntries(Object.keys(dayRates).map(key => [
       key,
-      dayRates[key] * STAFFED_SHIFT_DAY_FRACTION + nightRates[key] * nightFraction
+      dayRates[key] * dayFraction + nightRates[key] * nightFraction
     ]));
   }
 
@@ -3745,15 +3813,16 @@
   function getDailyAverageEcoReport() {
     const dayReport = getEcoRateReport(true);
     const nightReport = getEcoRateReport(false);
-    const nightFraction = 1 - STAFFED_SHIFT_DAY_FRACTION;
+    const dayFraction = getStaffedShiftDayFraction();
+    const nightFraction = 1 - dayFraction;
     const rates = Object.fromEntries(Object.keys(dayReport.rates).map(metric => [
       metric,
-      dayReport.rates[metric] * STAFFED_SHIFT_DAY_FRACTION + nightReport.rates[metric] * nightFraction
+      dayReport.rates[metric] * dayFraction + nightReport.rates[metric] * nightFraction
     ]));
     const contributors = {};
     for (const metric of Object.keys(rates)) {
       const combined = new Map();
-      for (const [report, weight] of [[dayReport, STAFFED_SHIFT_DAY_FRACTION], [nightReport, nightFraction]]) {
+      for (const [report, weight] of [[dayReport, dayFraction], [nightReport, nightFraction]]) {
         for (const contributor of report.contributors[metric]) {
           const key = `${contributor.kind}|${contributor.source}`;
           const existing = combined.get(key) || { source: contributor.source, amount: 0, kind: contributor.kind };
@@ -3765,7 +3834,7 @@
         .filter(contributor => Math.abs(contributor.amount) >= 0.0005)
         .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
     }
-    return { rates, contributors, day: dayReport, night: nightReport, dayFraction: STAFFED_SHIFT_DAY_FRACTION };
+    return { rates, contributors, day: dayReport, night: nightReport, dayFraction };
   }
 
   function getDailyAverageEcoRates() {
@@ -4743,9 +4812,9 @@
     const scheduleText = def.bridge
       ? "Permanent crossing · no workers required"
       : def.automaticProduction !== undefined && workerCapacity
-      ? "Automatic baseline day and night · helper boost 07:00–18:30"
+      ? `Automatic baseline day and night · helper boost ${getStaffedShiftLabel()}`
       : def.jobs
-        ? "07:00–18:30 · staffed work stops at night"
+        ? `${getStaffedShiftLabel()} · staffed work stops at night`
         : "Automatic · operates day and night";
     contextRows.push(`<div class="inspection-row"><span>Operating schedule</span><strong>${scheduleText}</strong></div>`);
     if (workerCapacity) {
@@ -4773,8 +4842,10 @@
       const loggingTarget = getLoggingTarget(building);
       const priorityCount = getPrioritizedTrees().length;
       const priorityStumpCount = workStumps.filter(stump => stump.priority).length;
-      const priorityTreeActive = Boolean(loggingTarget?.priority);
-      const stumpWorkers = !priorityTreeActive && workStumps.length ? assignedWorkers : 0;
+      const priorityStump = getPriorityStumpForCamp(building);
+      const priorityStumpActive = Boolean(priorityStump);
+      const priorityTreeActive = Boolean(loggingTarget?.priority) && !priorityStumpActive;
+      const stumpWorkers = priorityStumpActive || (!priorityTreeActive && workStumps.length) ? assignedWorkers : 0;
       const nextTimberYield = getLoggingTargetTimberYield(loggingTarget);
       const projectedTimberRate = getProjectedLoggingTimberRate(building);
       const storageFull = isTimberStorageFull();
@@ -4782,7 +4853,9 @@
       const timberStatus = storageBlocked
         ? "STORAGE TOO FULL FOR NEXT LOAD — automatic pause"
         : isVillagerNight()
-        ? "NIGHT SHUTDOWN — resumes at 07:00"
+        ? `NIGHT SHUTDOWN — resumes at ${formatVillageTime(STAFFED_SHIFT_START_HOUR)}`
+        : priorityStumpActive
+          ? `Priority stump at ${priorityStump.inRange ? "10×" : "regular"} clearing speed`
         : priorityTreeActive
         ? `Priority at ${loggingTarget.inRange ? "10×" : "regular"} felling speed`
         : workStumps.length
@@ -4797,7 +4870,7 @@
       contextRows.push(`<div class="inspection-row"><span>Priority work</span><strong>${priorityCount} marked tree${priorityCount === 1 ? "" : "s"} · ${priorityStumpCount} marked stump${priorityStumpCount === 1 ? "" : "s"} · ${remoteStumps} remote stump${remoteStumps === 1 ? "" : "s"}</strong></div>`);
       contextRows.push(`<div class="inspection-row"><span>Managed timber</span><strong>${woodFarms.length} nearby Wood Farm${woodFarms.length === 1 ? "" : "s"} · ${farmTrees} mature tree${farmTrees === 1 ? "" : "s"}${regrowthText} · mature plots before unmarked wild trees</strong></div>`);
       contextRows.push(`<div class="inspection-row"><span>Timber harvest</span><strong>${loggingTarget ? `${nextTimberYield} from next tree` : "No tree ready"} · ${OUTSIDE_TREE_FELLING_HOURS}-hour outside-zone base with ${STANDARD_LOGGING_CREW} workers · ${(OUTSIDE_TREE_FELLING_HOURS / IN_RANGE_LOGGING_MULTIPLIER * 60).toFixed(0)}-minute base inside · weather and worker conditions modify exact time · ${projectedTimberRate.toFixed(1)}/working day now</strong></div>`);
-      contextRows.push(`<div class="inspection-row"><span>Stump crew</span><strong>${priorityTreeActive ? "Waiting for marked tree" : `${stumpWorkers} worker${stumpWorkers === 1 ? "" : "s"} assigned`} · same five-hour / 10× location rule as chopping · marked stumps first · ${Math.round((Number(building.stumpProgress) || 0) * 100)}% toward next clearing tile</strong></div>`);
+      contextRows.push(`<div class="inspection-row"><span>Stump crew</span><strong>${priorityTreeActive ? "Waiting for marked tree" : `${stumpWorkers} worker${stumpWorkers === 1 ? "" : "s"} assigned`} · each worker adds 0.5× standard crew speed · same five-hour / 10× location rule as chopping · marked stumps first · ${Math.round((Number(building.stumpProgress) || 0) * 100)}% toward next clearing tile</strong></div>`);
       contextRows.push(`<div class="inspection-row"><span>Full-storage rule</span><strong id="loggingStoragePolicy">${building.workWhenStorageFull === true ? `Manual override on · work continues${storageFull ? " and excess timber is discarded" : " if storage fills"}` : `Automatic pause on · ${storageBlocked ? "camp is waiting for enough room for its next load" : "camp will stop before wasting timber"}`}</strong></div>`);
       inspectionControls.push(`<button id="loggingStorageOverride" class="secondary-button" type="button" aria-pressed="${building.workWhenStorageFull === true}">${building.workWhenStorageFull === true ? "Restore automatic full-storage pause" : "Allow work when timber storage is full"}</button>`);
     }
@@ -6065,11 +6138,11 @@
     dom.gameCanvas.dataset.loggingTargetOrder = "priority-stump,priority-tree,ordinary-stumps,mature-managed-tree,unmarked-wild-tree";
     dom.gameCanvas.dataset.loggingStopped = String(loggingCamps.filter(building => getLoggingAccessFactor(building) <= 0 || isLoggingStorageBlocked(building)).length);
     dom.gameCanvas.dataset.stumpPriorityCamps = String(loggingCamps.filter(building => !isLoggingStorageBlocked(building) && getAssignedWorkers(building.id) > 0 && getLoggingWorkStumps(building).length > 0 && !getLoggingTarget(building)?.priority).length);
-    dom.gameCanvas.dataset.priorityTreesOverrideStumps = String(loggingCamps.filter(building => !isLoggingStorageBlocked(building) && getLoggingWorkStumps(building).some(stump => !stump.priority) && getLoggingTarget(building)?.priority).length);
-    dom.gameCanvas.dataset.priorityStumpsOverrideTrees = String(loggingCamps.filter(building => !isLoggingStorageBlocked(building) && getLoggingWorkStumps(building)[0]?.priority && getLoggingTarget(building)?.priority).length);
+    dom.gameCanvas.dataset.priorityTreesOverrideStumps = String(loggingCamps.filter(building => !isLoggingStorageBlocked(building) && !getPriorityStumpForCamp(building) && getLoggingWorkStumps(building).some(stump => !stump.priority) && getLoggingTarget(building)?.priority).length);
+    dom.gameCanvas.dataset.priorityStumpsOverrideTrees = String(loggingCamps.filter(building => !isLoggingStorageBlocked(building) && Boolean(getPriorityStumpForCamp(building)) && Boolean(getLoggingTarget(building)?.priority)).length);
     dom.gameCanvas.dataset.activeLoggingFellers = String(staffedWorkActive ? loggingCamps.reduce((sum, building) => {
       const target = getLoggingTarget(building);
-      return sum + (!isLoggingStorageBlocked(building) && (target?.priority || !getLoggingWorkStumps(building).length) ? getAssignedWorkers(building.id) : 0);
+      return sum + (!isLoggingStorageBlocked(building) && !getPriorityStumpForCamp(building) && (target?.priority || !getLoggingWorkStumps(building).length) ? getAssignedWorkers(building.id) : 0);
     }, 0) : 0);
     dom.gameCanvas.dataset.priorityTrees = String(getPrioritizedTrees().length);
     dom.gameCanvas.dataset.treesPrioritized = String(state.stats.treesPrioritized || 0);
@@ -6198,9 +6271,9 @@
     dom.gameCanvas.dataset.staffedProductionActive = String(staffedWorkActive);
     dom.gameCanvas.dataset.passiveProductionActive = "true";
     dom.gameCanvas.dataset.nightProductionPolicy = "staffed-stops-passive-continues";
-    dom.gameCanvas.dataset.productionShift = "07:00-18:30";
+    dom.gameCanvas.dataset.productionShift = `${formatVillageTime(STAFFED_SHIFT_START_HOUR)}-${formatVillageTime(getStaffedShiftEndHour())}`;
     dom.gameCanvas.dataset.productionRateDisplay = "24-hour-average";
-    dom.gameCanvas.dataset.staffedShiftHours = (STAFFED_SHIFT_END_HOUR - STAFFED_SHIFT_START_HOUR).toFixed(1);
+    dom.gameCanvas.dataset.staffedShiftHours = (getStaffedShiftEndHour() - STAFFED_SHIFT_START_HOUR).toFixed(1);
     dom.gameCanvas.dataset.staffedBuildingsClosed = String(staffedWorkActive ? 0 : state.buildings.filter(building => BUILDINGS[building.type]?.jobs).length);
     dom.gameCanvas.dataset.passiveBuildingsOperating = String(state.buildings.filter(building => !BUILDINGS[building.type]?.jobs).length);
     for (const resource of ["food", "water", "wood", "stone"]) {
@@ -6563,9 +6636,9 @@
       const scheduleDetail = def.bridge
         ? "Permanent crossing · no workers"
         : def.automaticProduction !== undefined && workerCapacity
-        ? isVillagerNight() ? "Automatic baseline · helper boost paused" : "Automatic baseline + daytime helpers"
-        : def.jobs
-          ? isVillagerNight() ? "Night shutdown · resumes at 07:00" : "Day shift operating until 18:30"
+          ? isVillagerNight() ? `Automatic baseline · helper boost paused until ${formatVillageTime(STAFFED_SHIFT_START_HOUR)}` : "Automatic baseline + daytime helpers"
+          : def.jobs
+          ? isVillagerNight() ? `Night shutdown · resumes at ${formatVillageTime(STAFFED_SHIFT_START_HOUR)}` : `Day shift operating until ${formatVillageTime(getStaffedShiftEndHour())}`
           : "Automatic · operates 24 hours";
       localDetail = `${scheduleDetail} · ${localDetail}`;
       html = `<strong>${escapeHtml(def.name)}</strong><span>${building.w} × ${building.h} · ${["North", "East", "South", "West"][normaliseRotation(building.rotation)]} · built Day ${building.builtDay}</span><span class="tooltip-impact">${escapeHtml(localDetail)}</span>`;
@@ -7429,6 +7502,7 @@
     dom.gameCanvas.dataset.villagerPathfinding = "breadth-first-obstacle-aware";
     dom.gameCanvas.dataset.schoolTeachers = String(state.people.filter(person => getBuildingById(person.workBuildingId)?.type === "school").length);
     dom.gameCanvas.dataset.enrolledPupils = String(state.people.filter(person => person.ageGroup === "child" && person.schoolBuildingId).length);
+    dom.gameCanvas.dataset.pupilsInSchool = String(villagers.filter(person => person.indoors && getBuildingById(person.indoorBuildingId)?.type === "school").length);
     dom.gameCanvas.dataset.homedVillagers = String(state.people.filter(person => getBuildingById(person.homeBuildingId)).length);
     dom.gameCanvas.dataset.nightHomeTargets = String(villagers.filter(person => person.targetPurpose === "home").length);
     dom.gameCanvas.dataset.villagersIndoors = String(villagers.filter(person => person.indoors).length);
@@ -7504,12 +7578,9 @@
   }
 
   function farmWorkTile(building, person) {
-    const offset = Math.abs(person.personId * 7 + person.steps * 3);
-    return {
-      x: building.x + offset % building.w,
-      y: building.y + Math.floor(offset / building.w) % building.h,
-      inside: true
-    };
+    const tiles = buildingPathTiles(building);
+    if (!tiles.length) return buildingApproachTile(building, person);
+    return tiles[Math.abs(person.personId * 7 + person.steps * 3) % tiles.length];
   }
 
   function getVillageHour(target = state) {
@@ -7518,7 +7589,7 @@
 
   function isVillagerNight(target = state) {
     const hour = getVillageHour(target);
-    return hour < STAFFED_SHIFT_START_HOUR || hour >= STAFFED_SHIFT_END_HOUR;
+    return hour < STAFFED_SHIFT_START_HOUR || hour >= getStaffedShiftEndHour(target);
   }
 
   function villagerDestination(person) {
@@ -7527,7 +7598,7 @@
     const hour = getVillageHour();
     let preferred = [];
     let purpose = "wander";
-    if (hour >= STAFFED_SHIFT_START_HOUR && hour < STAFFED_SHIFT_END_HOUR) {
+    if (hour >= STAFFED_SHIFT_START_HOUR && hour < getStaffedShiftEndHour()) {
       if (record.ageGroup === "child") {
         const school = getBuildingById(record.schoolBuildingId);
         if (hour < 15 && school) {
@@ -7563,7 +7634,7 @@
     const choiceNoise = seededNoise(person.id + person.steps, state.day, state.terrainSeed ^ 0xa24baed4);
     const building = preferred[Math.floor(choiceNoise * preferred.length) % Math.max(1, preferred.length)];
     const approach = building
-      ? purpose === "home" ? buildingHomeTile(building, person) : purpose === "work" && building.type === "farm" ? farmWorkTile(building, person) : buildingApproachTile(building, person)
+      ? purpose === "home" || purpose === "school" ? buildingHomeTile(building, person) : purpose === "work" && building.type === "farm" ? farmWorkTile(building, person) : buildingApproachTile(building, person)
       : null;
     return approach ? { ...approach, buildingId: building.id, purpose } : null;
   }
@@ -7583,6 +7654,13 @@
       record.carriedItem = item;
       record.carriedAmount = 1 + Math.floor(seededNoise(record.id, person.steps + state.day * 17, state.terrainSeed) * record.carryCapacity);
       record.tripPhase = "deliver";
+    } else if (target.purpose === "school" && record.ageGroup === "child" && record.schoolBuildingId === target.buildingId) {
+      person.indoors = true;
+      person.indoorBuildingId = target.buildingId;
+      person.nextX = person.tileX;
+      person.nextY = person.tileY;
+      person.progress = 0;
+      if (hoveredVillagerId === record.id) hoveredVillagerId = null;
     } else if (target.purpose === "deliver") {
       record.carriedItem = "";
       record.carriedAmount = 0;
@@ -7697,11 +7775,18 @@
         const record = getPersonById(person.personId);
         const indoorHome = getBuildingById(person.indoorBuildingId);
         const assignedHome = getBuildingById(record?.homeBuildingId);
+        const assignedSchool = getBuildingById(record?.schoolBuildingId);
         const stillInHome = indoorHome
           && BUILDINGS[indoorHome.type]?.housing
           && getBuildingAt(person.tileX, person.tileY)?.id === indoorHome.id
           && (!assignedHome || assignedHome.id === indoorHome.id);
-        if (isVillagerNight() && stillInHome) {
+        const stillInSchool = indoorHome
+          && indoorHome.type === "school"
+          && record?.ageGroup === "child"
+          && assignedSchool?.id === indoorHome.id
+          && getBuildingAt(person.tileX, person.tileY)?.id === indoorHome.id;
+        const inSchoolHours = getVillageHour() >= STAFFED_SHIFT_START_HOUR && getVillageHour() < Math.min(15, getStaffedShiftEndHour());
+        if ((isVillagerNight() && stillInHome) || (inSchoolHours && stillInSchool)) {
           person.nextX = person.tileX;
           person.nextY = person.tileY;
           person.progress = 0;
@@ -8180,6 +8265,14 @@
         autumnProgress(day, dayProgress = 0) {
           return getAutumnColourProgress({ day, dayProgress });
         },
+        staffedShift(day) {
+          const target = { day: Number(day) || 1 };
+          return {
+            start: STAFFED_SHIFT_START_HOUR,
+            end: getStaffedShiftEndHour(target),
+            fraction: getStaffedShiftDayFraction(target)
+          };
+        },
         treeColours(seasonId, autumnProgress, colourVariation, evergreen = false) {
           return getTreeColours(seasonId, autumnProgress, colourVariation, evergreen);
         },
@@ -8197,7 +8290,7 @@
             day: getEcoRates(true),
             night: getEcoRates(false),
             daily: getDailyAverageEcoRates(),
-            dayFraction: STAFFED_SHIFT_DAY_FRACTION
+            dayFraction: getStaffedShiftDayFraction()
           };
         },
         noiseReport(staffedProductionActive = null) {
@@ -8703,8 +8796,12 @@
       const insideStumpRate = getLoggingStumpRate(camp, { x: 40, y: 48, index: tileIndex(40, 48) }, speedState, true);
       const outsideHours = outsideRate > 0 ? 24 / outsideRate : Infinity;
       const insideHours = insideRate > 0 ? 24 / insideRate : Infinity;
+      const fourWorkerOutsideHours = outsideRate > 0 ? 24 / (outsideRate * (4 / STANDARD_LOGGING_CREW)) : Infinity;
+      const sixWorkerOutsideHours = outsideRate > 0 ? 24 / (outsideRate * (6 / STANDARD_LOGGING_CREW)) : Infinity;
       const checks = [
         ["A full two-person crew fells an outside-zone tree in five base hours", getAssignedWorkersForState(camp.id, speedState) === 2 && Math.abs(outsideHours - OUTSIDE_TREE_FELLING_HOURS) < 0.0001],
+        ["Four shared logging workers halve an outside priority job to 2.5 hours", Math.abs(fourWorkerOutsideHours - OUTSIDE_TREE_FELLING_HOURS / 2) < 0.0001],
+        ["Six shared logging workers complete it at triple speed", Math.abs(sixWorkerOutsideHours - OUTSIDE_TREE_FELLING_HOURS / 3) < 0.0001],
         ["The 10× logging zone reduces the base time to thirty minutes", Math.abs(insideHours - OUTSIDE_TREE_FELLING_HOURS / IN_RANGE_LOGGING_MULTIPLIER) < 0.0001],
         ["Outside-zone stumps use the same five-hour base rate", Math.abs(outsideStumpRate - outsideRate) < 0.0001],
         ["Inside-zone stumps use the same ten-times-faster rate", Math.abs(insideStumpRate - insideRate) < 0.0001],
@@ -8714,7 +8811,7 @@
       const result = document.createElement("pre");
       result.id = "directTestResult";
       result.style.cssText = "position:fixed;z-index:99999;inset:8px auto auto 8px;max-width:900px;margin:0;padding:16px;background:#fff;color:#111;border:3px solid #111;font:16px/1.5 monospace;white-space:pre-wrap";
-      result.textContent = `${passed ? "PASS" : "FAIL"}\n${checks.map(([name, pass]) => `${pass ? "✓" : "✗"} ${name}`).join("\n")}\nOutside ${outsideHours.toFixed(2)}h · inside ${insideHours.toFixed(2)}h · ${outsideRate.toFixed(2)} trees/day outside · ${insideRate.toFixed(2)} trees/day inside`;
+      result.textContent = `${passed ? "PASS" : "FAIL"}\n${checks.map(([name, pass]) => `${pass ? "✓" : "✗"} ${name}`).join("\n")}\nOutside ${outsideHours.toFixed(2)}h · 4 workers ${fourWorkerOutsideHours.toFixed(2)}h · 6 workers ${sixWorkerOutsideHours.toFixed(2)}h · inside ${insideHours.toFixed(2)}h`;
       document.body.prepend(result);
       document.title = passed ? "PASS" : "FAIL";
     }
