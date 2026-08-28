@@ -7,6 +7,8 @@ Checked 28 August 2026 after adding multi-select tree priority.
 - **Births could never accumulate.** Growth was calculated as small fractional amounts, then the resident-roster synchronisation rounded the population back down on every simulation tick. `populationChangeProgress` now persists the fractional remainder and creates a village-born child when it reaches one full resident. The same mechanism prevents fractional hardship losses from removing a resident too early.
 - **Logging-priority regression test could fail despite correct gameplay.** Its final assertion assumed it was still daytime after several simulated shifts plus real-time long-hold delays. The test now checks that residents match the *current* day/night shift instead.
 - **Tree priority tool could render as a half-width orphan.** The planning toolbar uses two columns; its third button now spans the full row.
+- **Children could be enrolled in an unstaffed school.** School seats now become available only while at least one teacher is assigned, so pupils travel to a functioning school rather than an empty building.
+- **Villager travel did not match the time control exactly.** Movement now scales directly with 1×, 2× or 3×, including pauses between work steps. Farmers also remain in their assigned fields and visibly work there instead of immediately beginning a delivery trip.
 
 ## Remaining risks to monitor
 

@@ -553,7 +553,7 @@
       name: "Village School",
       short: "▤",
       category: "village",
-      description: "Sixteen school places educate offspring before they grow into skilled adults.",
+      description: "Up to sixteen school places educate offspring while at least one teacher is assigned.",
       cost: { wood: 30, stone: 18 },
       size: { w: 3, h: 2 },
       jobs: 2,
@@ -2696,7 +2696,7 @@
     }
 
     const schoolPlaces = [];
-    for (const building of target.buildings.filter(item => BUILDINGS[item.type]?.schoolSeats)) {
+    for (const building of target.buildings.filter(item => BUILDINGS[item.type]?.schoolSeats && getAssignedWorkersForState(item.id, target) > 0)) {
       for (let seat = 0; seat < BUILDINGS[building.type].schoolSeats; seat++) schoolPlaces.push(building);
     }
     let childIndex = 0;
@@ -2738,8 +2738,8 @@
       : { title: "Available worker", workplace: "Unassigned", building: null };
   }
 
-  function getSchoolCapacity() {
-    return state.buildings.reduce((total, building) => total + (BUILDINGS[building.type]?.schoolSeats || 0), 0);
+  function getSchoolCapacity(target = state) {
+    return target.buildings.reduce((total, building) => total + (getAssignedWorkersForState(building.id, target) > 0 ? BUILDINGS[building.type]?.schoolSeats || 0 : 0), 0);
   }
 
   function getChildSupport() {
@@ -2796,6 +2796,16 @@
     if (target.loggedTrees?.[tileIndex(x, y)]) return false;
     const treeNoise = seededNoise(x, y, target.terrainSeed ^ 0x9e3779b9);
     return treeNoise < target.ecosystem.forest / 100 + 0.1;
+  }
+
+  function getStandingWildTreeCount(target = state) {
+    let trees = 0;
+    for (let y = 0; y < WORLD_SIZE; y++) {
+      for (let x = 0; x < WORLD_SIZE; x++) {
+        if (isStandingTree(x, y, target)) trees++;
+      }
+    }
+    return trees;
   }
 
   function initialiseAfterFireBurnedTrees(target) {
@@ -3673,6 +3683,9 @@
     if (state.ecosystem.water < 92) add("water", 0.045 * difficulty.resilience, "Watershed recovery", "natural");
     if (state.ecosystem.soil < 90) add("soil", 0.05 * difficulty.resilience, "Natural soil recovery", "natural");
     if (state.ecosystem.air < 97) add("air", 0.15 * difficulty.resilience, "Natural air clearing", "natural");
+    const standingWildTrees = getStandingWildTreeCount();
+    const airFilteringTreeGroups = Math.floor(standingWildTrees / 50);
+    if (airFilteringTreeGroups) add("air", airFilteringTreeGroups * 0.02, `${standingWildTrees} standing wild trees`, "forest");
     if (state.ecosystem.biodiversity < 91) add("biodiversity", 0.04 * difficulty.resilience, "Natural recolonisation", "natural");
     const schoolReduction = Math.max(0.58, 1 - countBuilding("school") * 0.11);
 
@@ -4959,7 +4972,7 @@
       reservoir: "About 20 water/day in most weather",
       market: "Production efficiency and happiness",
       windmill: "+20% output to every farm",
-      school: "16 school places, education, and 11% less ecological harm",
+      school: "Up to 16 school places with a teacher, education, and 11% less ecological harm",
       playground: "Health and happiness for up to 10 children",
       park: "Happiness and habitat",
       townhouse: "16 housing",
@@ -5948,6 +5961,7 @@
     const waterwayTypes = Object.values(state.waterways || {});
     const waterwaysFrozen = areWaterwaysFrozen();
     const burnedTreeIndices = Object.keys(state.burnedTrees || {}).map(Number).filter(Number.isInteger);
+    const standingWildTrees = getStandingWildTreeCount();
     const rawProducers = state.buildings.filter(building => ["lumber", "quarry"].includes(building.type));
     const currentProductionRates = getProductionRates();
     const productionRates = getDailyAverageProductionRates();
@@ -6017,6 +6031,9 @@
     dom.gameCanvas.dataset.woodFarmTreesHarvested = String(state.stats.woodFarmTreesHarvested || 0);
     dom.gameCanvas.dataset.treeTimberMin = String(TREE_TIMBER_MIN);
     dom.gameCanvas.dataset.treeTimberMax = String(TREE_TIMBER_MAX);
+    dom.gameCanvas.dataset.standingWildTrees = String(standingWildTrees);
+    dom.gameCanvas.dataset.wildTreesPerAirBonus = "50";
+    dom.gameCanvas.dataset.wildTreeAirBonus = (Math.floor(standingWildTrees / 50) * 0.02).toFixed(2);
     dom.gameCanvas.dataset.burnedTreeCount = String(burnedTreeIndices.length);
     dom.gameCanvas.dataset.standingBurnedTrees = String(burnedTreeIndices.filter(index => isStandingTree(index % WORLD_SIZE, Math.floor(index / WORLD_SIZE))).length);
     dom.gameCanvas.dataset.burnedTreeShare = String(AFTER_FIRE_BURNED_TREE_SHARE);
@@ -7312,6 +7329,9 @@
     if (!dom.gameCanvas) return;
     dom.gameCanvas.dataset.villagers = String(villagers.length);
     dom.gameCanvas.dataset.villagerSpeedMultiplier = String(VILLAGER_SPEED_MULTIPLIER);
+    dom.gameCanvas.dataset.villagerMovementSpeed = `${state.speed}x`;
+    dom.gameCanvas.dataset.schoolTeachers = String(state.people.filter(person => getBuildingById(person.workBuildingId)?.type === "school").length);
+    dom.gameCanvas.dataset.enrolledPupils = String(state.people.filter(person => person.ageGroup === "child" && person.schoolBuildingId).length);
     dom.gameCanvas.dataset.homedVillagers = String(state.people.filter(person => getBuildingById(person.homeBuildingId)).length);
     dom.gameCanvas.dataset.nightHomeTargets = String(villagers.filter(person => person.targetPurpose === "home").length);
     dom.gameCanvas.dataset.villagersIndoors = String(villagers.filter(person => person.indoors).length);
@@ -7386,6 +7406,15 @@
     return indoorPaths[Math.abs(person.personId || person.id) % indoorPaths.length];
   }
 
+  function farmWorkTile(building, person) {
+    const offset = Math.abs(person.personId * 7 + person.steps * 3);
+    return {
+      x: building.x + offset % building.w,
+      y: building.y + Math.floor(offset / building.w) % building.h,
+      inside: true
+    };
+  }
+
   function getVillageHour(target = state) {
     return ((0.25 + (Number(target?.dayProgress) || 0)) % 1) * 24;
   }
@@ -7437,7 +7466,7 @@
     const choiceNoise = seededNoise(person.id + person.steps, state.day, state.terrainSeed ^ 0xa24baed4);
     const building = preferred[Math.floor(choiceNoise * preferred.length) % Math.max(1, preferred.length)];
     const approach = building
-      ? purpose === "home" ? buildingHomeTile(building, person) : buildingApproachTile(building, person)
+      ? purpose === "home" ? buildingHomeTile(building, person) : purpose === "work" && building.type === "farm" ? farmWorkTile(building, person) : buildingApproachTile(building, person)
       : null;
     return approach ? { ...approach, buildingId: building.id, purpose } : null;
   }
@@ -7447,6 +7476,12 @@
     if (!record) return;
     if (target.purpose === "work" && record.workBuildingId === target.buildingId) {
       const workplace = getBuildingById(record.workBuildingId);
+      if (workplace?.type === "farm") {
+        record.carriedItem = "";
+        record.carriedAmount = 0;
+        record.tripPhase = "work";
+        return;
+      }
       const item = CARRY_ITEMS[workplace?.type] || "supplies";
       record.carriedItem = item;
       record.carriedAmount = 1 + Math.floor(seededNoise(record.id, person.steps + state.day * 17, state.terrainSeed) * record.carryCapacity);
@@ -7488,7 +7523,10 @@
       person.targetBuildingId = target.buildingId;
       person.progress = 0;
       person.steps += 1;
-      person.wait = 0.7 + seededNoise(person.id, person.steps, state.terrainSeed) * 1.6;
+      const workplace = target.purpose === "work" ? getBuildingById(target.buildingId) : null;
+      person.wait = workplace?.type === "farm"
+        ? 1.1 + seededNoise(person.id, person.steps, state.terrainSeed) * 1.2
+        : 0.7 + seededNoise(person.id, person.steps, state.terrainSeed) * 1.6;
       return;
     }
     const wander = target?.purpose !== "home" && seededNoise(person.id, person.steps + state.day * 11, state.terrainSeed) < 0.18;
@@ -7552,7 +7590,7 @@
       }
       if (person.nextX === person.tileX && person.nextY === person.tileY) chooseVillagerStep(person);
       if (person.indoors) continue;
-      person.progress += seconds * person.speed * (0.82 + state.speed * 0.18);
+      person.progress += seconds * person.speed * state.speed;
       if (person.progress >= 1) {
         person.tileX = person.nextX;
         person.tileY = person.nextY;
@@ -7607,6 +7645,8 @@
       const record = getPersonById(person.personId);
       if (!record) continue;
       const moving = person.nextX !== person.tileX || person.nextY !== person.tileY;
+      const workplace = getBuildingById(record.workBuildingId);
+      const farming = !moving && person.targetPurpose === "work" && workplace?.type === "farm";
       const ageScale = person.age === "child" ? 0.72 : person.age === "elder" ? 0.88 : 1;
       const visualScale = clamp(scale / 24, 0.48, 1.65) * ageScale;
       const bob = moving ? Math.sin(now / 95 + person.phase) * 0.7 : 0;
@@ -7625,8 +7665,17 @@
       ctx.lineWidth = 1.3;
       const stride = moving ? Math.sin(now / 95 + person.phase) * 1.8 : 0;
       ctx.beginPath(); ctx.moveTo(-1,2.5); ctx.lineTo(-1 + stride,6); ctx.moveTo(1,2.5); ctx.lineTo(1 - stride,6); ctx.stroke();
-      ctx.fillStyle = palettes[person.colour];
+      ctx.fillStyle = farming ? "#66854b" : palettes[person.colour];
       ctx.fillRect(-3,-4,6,8);
+      if (farming) {
+        const hoeSwing = Math.sin(now / 150 + person.phase) * 2.2;
+        ctx.strokeStyle = "#8e6942";
+        ctx.lineWidth = 1.15;
+        ctx.beginPath(); ctx.moveTo(2, -1); ctx.lineTo(5.2 + hoeSwing, 5.3); ctx.stroke();
+        ctx.strokeStyle = "#b8a777";
+        ctx.lineWidth = 1.35;
+        ctx.beginPath(); ctx.moveTo(3.8 + hoeSwing, 4.8); ctx.lineTo(6.5 + hoeSwing, 4.8); ctx.stroke();
+      }
       if (record.ageGroup === "child" && record.schoolBuildingId) {
         ctx.fillStyle = "#c49a54"; ctx.fillRect(2,-2.5,2.4,4.6);
       }
