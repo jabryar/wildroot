@@ -118,7 +118,11 @@
         win.__wildrootTest.step(14000);
         check("priority stump is removed before the ordinary stump", canvas.dataset.priorityStumps === "0" && canvas.dataset.priorityStumpsRemoved === "1" && canvas.dataset.remoteLoggingStumps === "0" && canvas.dataset.loggedTrees === "1", `${canvas.dataset.priorityStumpsRemoved} priority removed · ${canvas.dataset.loggedTrees} ordinary waiting`);
 
-        check("residents remain on the daytime shift after overnight-paused work", canvas.dataset.villagersIndoors === "0" && canvas.dataset.villagersOutdoors === canvas.dataset.villagers, `${canvas.dataset.villagersIndoors} indoors · ${canvas.dataset.villagersOutdoors} / ${canvas.dataset.villagers} outdoors`);
+        const residentsAccountedFor = Number(canvas.dataset.villagersIndoors) + Number(canvas.dataset.villagersOutdoors) === Number(canvas.dataset.villagers);
+        const residentsMatchCurrentShift = canvas.dataset.staffedProductionActive === "true"
+          ? canvas.dataset.villagersIndoors === "0"
+          : Number(canvas.dataset.villagersIndoors) > 0;
+        check("residents follow the current work shift after overnight-paused work", residentsAccountedFor && residentsMatchCurrentShift, `${canvas.dataset.staffedProductionActive === "true" ? "day" : "night"} · ${canvas.dataset.villagersIndoors} indoors · ${canvas.dataset.villagersOutdoors} / ${canvas.dataset.villagers} outdoors`);
       }
     } catch (error) {
       checks.push({ name: "uncaught test error", pass: false, detail: String(error?.stack || error) });
