@@ -198,6 +198,66 @@
       buildEco: { soil: -0.25 },
       dailyEco: { soil: -0.05 }
     },
+    water_tank: {
+      id: "water_tank",
+      name: "Water Tank",
+      short: "◯",
+      category: "village",
+      description: "A 2 × 2 covered tank that adds room for 500 water only.",
+      cost: { wood: 22, stone: 12 },
+      size: { w: 2, h: 2 },
+      jobs: 0,
+      storageByResource: { water: 500 },
+      impact: "low",
+      impactLabel: "Water-only storage",
+      buildEco: { soil: -0.18 },
+      dailyEco: { soil: -0.02 }
+    },
+    timber_yard: {
+      id: "timber_yard",
+      name: "Timber Yard",
+      short: "▰",
+      category: "industry",
+      description: "A 2 × 2 covered timber stack that adds room for 500 timber only.",
+      cost: { wood: 14, stone: 8 },
+      size: { w: 2, h: 2 },
+      jobs: 0,
+      storageByResource: { wood: 500 },
+      impact: "low",
+      impactLabel: "Timber-only storage",
+      buildEco: { soil: -0.18 },
+      dailyEco: { soil: -0.02 }
+    },
+    stone_depot: {
+      id: "stone_depot",
+      name: "Stone Depot",
+      short: "⬟",
+      category: "industry",
+      description: "A 2 × 2 stone store that adds room for 500 stone only.",
+      cost: { wood: 16, stone: 10 },
+      size: { w: 2, h: 2 },
+      jobs: 0,
+      storageByResource: { stone: 500 },
+      impact: "low",
+      impactLabel: "Stone-only storage",
+      buildEco: { soil: -0.2 },
+      dailyEco: { soil: -0.025 }
+    },
+    large_storage: {
+      id: "large_storage",
+      name: "Large Storehouse",
+      short: "▦",
+      category: "village",
+      description: "A 3 × 3 central storehouse adding room for 500 food, water, timber and stone each.",
+      cost: { wood: 55, stone: 40 },
+      size: { w: 3, h: 3 },
+      jobs: 0,
+      storage: 500,
+      impact: "medium",
+      impactLabel: "+500 each",
+      buildEco: { soil: -0.65, biodiversity: -0.16 },
+      dailyEco: { air: -0.025 }
+    },
     creek_bridge: {
       id: "creek_bridge",
       name: "Creek Footbridge",
@@ -1746,14 +1806,22 @@
     return false;
   }
 
+  function buildingsShareEdge(first, second) {
+    const horizontalOverlap = first.x < second.x + second.w && first.x + first.w > second.x;
+    const verticalOverlap = first.y < second.y + second.h && first.y + first.h > second.y;
+    return (horizontalOverlap && (first.y + first.h === second.y || second.y + second.h === first.y))
+      || (verticalOverlap && (first.x + first.w === second.x || second.x + second.w === first.x));
+  }
+
   function touchesBuildingTypeForState(target, originX, originY, size, requiredType) {
-    return (target.buildings || []).some(building => {
-      if (building.type !== requiredType) return false;
-      const horizontalOverlap = originX < building.x + building.w && originX + size.w > building.x;
-      const verticalOverlap = originY < building.y + building.h && originY + size.h > building.y;
-      return (horizontalOverlap && (originY + size.h === building.y || building.y + building.h === originY))
-        || (verticalOverlap && (originX + size.w === building.x || building.x + building.w === originX));
-    });
+    const candidate = { x: originX, y: originY, w: size.w, h: size.h };
+    return (target.buildings || []).some(building => building.type === requiredType && buildingsShareEdge(candidate, building));
+  }
+
+  function getFarmBarnRemovalBlockers(farm, target = state) {
+    if (!farm || farm.type !== "farm") return [];
+    const farms = (target.buildings || []).filter(building => building.type === "farm" && building.id !== farm.id);
+    return (target.buildings || []).filter(barn => barn.type === "barn" && buildingsShareEdge(farm, barn) && !farms.some(otherFarm => buildingsShareEdge(otherFarm, barn)));
   }
 
   function canOccupyOnState(target, type, originX, originY, rotation = 0) {
@@ -4785,6 +4853,11 @@
       showMapMessage("The Founders’ Hearth cannot be destroyed.");
       return;
     }
+    const dependentBarns = getFarmBarnRemovalBlockers(building);
+    if (dependentBarns.length) {
+      showMapMessage(`Cannot destroy this Field Farm: ${dependentBarns.length} attached Farm Barn${dependentBarns.length === 1 ? "" : "s"} needs another adjacent Field Farm first.`);
+      return;
+    }
 
     const housingAfter = getHousing() - (def.housing || 0);
     const warning = housingAfter < state.population
@@ -5113,6 +5186,10 @@
       cottage: "6 housing",
       storage: "+200 food, water, timber and stone capacity",
       barn: "+500 food-only capacity beside a Field Farm",
+      water_tank: "+500 water-only capacity",
+      timber_yard: "+500 timber-only capacity",
+      stone_depot: "+500 stone-only capacity",
+      large_storage: "+500 food, water, timber and stone capacity",
       creek_bridge: "A walkable crossing over one creek tile without filling the channel",
       river_bridge: "A walkable crossing over three river tiles without filling the channel",
       farm: "About 25 food/day with two farmers; up to 50/day with three before season, soil and nearby pollution",
@@ -5161,7 +5238,7 @@
     if (["sanctuary", "park", "playground"].includes(type)) return "Green spaces provide habitat, cooling and wellbeing. Connected and varied spaces protect more life than isolated patches.";
     if (type === "windmill") return "Cleaner technology can raise output without fuel combustion, although construction, land use and low mechanical noise still matter. A housing buffer protects residents while keeping the clean-energy benefit.";
     if (BUILDINGS[type]?.pollution || BUILDINGS[type]?.noise) return "Pollution has local consequences. Separating fumes and noise from crops, forest edges and occupied homes is practical environmental zoning; quieter equipment and prevention at the source are stronger still.";
-    if (["storage", "granary", "barn"].includes(type)) return type === "barn"
+    if (["storage", "large_storage", "water_tank", "timber_yard", "stone_depot", "granary", "barn"].includes(type)) return type === "barn"
       ? "A barn can protect a farm harvest from overflowing, but it must sit beside its Field Farm and its footprint still puts pressure on living soil."
       : "Storage reduces waste and improves resilience, but it cannot create resources or remove the impacts of producing them.";
     if (["hearth", "cottage", "townhouse"].includes(type)) {
@@ -7350,6 +7427,27 @@
         for (let x = -6; x <= 6; x += 4) { ctx.beginPath(); ctx.moveTo(x, -1); ctx.lineTo(x, 8); ctx.stroke(); }
         ctx.fillStyle = "#4d3527"; ctx.fillRect(-3, 2, 6, 6);
         break;
+      case "water_tank":
+        ctx.fillStyle = "#758a8e"; ctx.beginPath(); ctx.ellipse(0, 1, 10, 8, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = "#4c8d9d"; ctx.beginPath(); ctx.ellipse(0, -1, 7.5, 4.5, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.strokeStyle = "#c0d1cb"; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(0, 1, 10, 0, Math.PI * 2); ctx.stroke();
+        break;
+      case "timber_yard":
+        ctx.fillStyle = "#80543a"; ctx.fillRect(-10, -2, 20, 10);
+        ctx.strokeStyle = "#4b3226"; ctx.lineWidth = 2;
+        for (let y = -1; y <= 7; y += 3) { ctx.beginPath(); ctx.moveTo(-10, y); ctx.lineTo(10, y); ctx.stroke(); }
+        ctx.fillStyle = "#b37a48"; ctx.beginPath(); ctx.moveTo(-11, -2); ctx.lineTo(-7, -8); ctx.lineTo(7, -8); ctx.lineTo(11, -2); ctx.closePath(); ctx.fill();
+        break;
+      case "stone_depot":
+        ctx.fillStyle = "#6f7774";
+        [[-6, 4, 5], [0, 3, 7], [6, 5, 4], [-3, -2, 4], [5, -3, 3]].forEach(([x, y, radius]) => { ctx.beginPath(); ctx.arc(x, y, radius, 0, Math.PI * 2); ctx.fill(); });
+        ctx.strokeStyle = "#b3b5a7"; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(-10, 9); ctx.lineTo(10, 9); ctx.stroke();
+        break;
+      case "large_storage":
+        house("#9c815b", "#514236", 2);
+        ctx.fillStyle = "#bd9156"; ctx.fillRect(-11, 2, 5, 6); ctx.fillRect(6, 1, 5, 7);
+        ctx.strokeStyle = "#62472f"; ctx.lineWidth = 1; ctx.strokeRect(-11, 2, 5, 6); ctx.strokeRect(6, 1, 5, 7);
+        break;
       case "reservoir":
         ctx.fillStyle="#777f76";ctx.beginPath();ctx.ellipse(0,0,11,8,0,0,Math.PI*2);ctx.fill();ctx.fillStyle="#477988";ctx.beginPath();ctx.ellipse(0,-1,8.5,5.5,0,0,Math.PI*2);ctx.fill();
         ctx.strokeStyle="#b5a77c";ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(-10,-8);ctx.lineTo(10,-8);ctx.moveTo(-7,-11);ctx.lineTo(7,-11);ctx.stroke();
@@ -8416,6 +8514,10 @@
         },
         managedTreeTimberYield(farmId, plotIndex, seed = 12345) {
           return getManagedTreeTimberYield({ id: Math.max(1, Math.floor(Number(farmId) || 1)) }, Math.max(0, Math.floor(Number(plotIndex) || 0)), { terrainSeed: Number(seed) || 0 });
+        },
+        farmBarnRemovalBlockers(farmId) {
+          const farm = state.buildings.find(building => building.id === Number(farmId) && building.type === "farm");
+          return getFarmBarnRemovalBlockers(farm).length;
         },
         loggingTargetOrder(hasPriorityTree = false, hasManagedTree = false, hasWildTree = false) {
           const chosen = selectLoggingTarget(

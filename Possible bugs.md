@@ -16,6 +16,8 @@ Checked 29 August 2026 after priority logging, villager movement, and seasonal-w
 - **Priority stumps could wait behind priority trees.** The logging queue now processes priority stumps first, then priority trees, then ordinary stumps and automatic tree targets.
 - **Several Logging Camps could duplicate a remote priority job.** Each staffed camp now chooses its nearest marked tree or stump; camps that choose the same outside-zone target combine their assigned workers on one progress bar. Every logger supplies 0.5× standard two-worker speed, so four workers take a five-hour outside job in 2.5 hours and six take about 1 hour 40 minutes.
 - **Wood Farm trees could drift out of their plot centres while growing.** The 4 × 4 field grid and every seedling/tree now use the same evenly spaced centre coordinates.
+- **A Farm Barn could be orphaned by demolishing its Field Farm.** Farm demolition is now blocked unless every attached Barn still shares an edge with another Field Farm.
+- **Dedicated storage could increase the wrong resource capacity.** Food Barns, Water Tanks, Timber Yards and Stone Depots now use per-resource capacity entries, while the Large Storehouse adds its 500 capacity to all four resources.
 
 ## Remaining risks to monitor
 

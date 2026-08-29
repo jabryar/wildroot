@@ -30,7 +30,7 @@
     nextEventDay: 100,
     population: 12,
     demographics: { children: 0, adults: 12, elders: 0 },
-    resources: { food: 450, water: 180, wood: 100, stone: 100 },
+    resources: { food: 450, water: 180, wood: 300, stone: 300 },
     terrainSeed: 12873465,
     buildings: [
       { type: "hearth", x: 49, y: 49, rotation: 0, builtDay: 1, id: 1 },
@@ -90,6 +90,28 @@
       clickWorld(win, canvas, 41.5, 55.5);
       await wait(450);
       check("Farm Barn beside a Field Farm adds 500 food-only storage", canvas.dataset.storageCapacityFood === "1100" && ["Water", "Wood", "Stone"].every(resource => canvas.dataset[`storageCapacity${resource}`] === "600"), `${canvas.dataset.storageCapacityFood}/${canvas.dataset.storageCapacityWater}/${canvas.dataset.storageCapacityWood}/${canvas.dataset.storageCapacityStone}`);
+      check("Farm demolition is blocked when it would orphan its Farm Barn", win.__wildrootTest.farmBarnRemovalBlockers(4) === 1, String(win.__wildrootTest.farmBarnRemovalBlockers(4)));
+      doc.querySelector('[data-building="farm"]').click();
+      clickWorld(win, canvas, 38.5, 55.5);
+      await wait(450);
+      check("A second Field Farm attached to the Barn allows the first Farm to be removed", win.__wildrootTest.farmBarnRemovalBlockers(4) === 0, String(win.__wildrootTest.farmBarnRemovalBlockers(4)));
+
+      check("Water Tank, Timber Yard and Stone Depot are 2x2", ["water_tank", "timber_yard", "stone_depot"].every(type => doc.querySelector(`[data-building="${type}"] .size-chip`)?.textContent === "2×2"), ["water_tank", "timber_yard", "stone_depot"].map(type => doc.querySelector(`[data-building="${type}"] .size-chip`)?.textContent || "missing").join("/"));
+      check("Large Storehouse is 3x3", doc.querySelector('[data-building="large_storage"] .size-chip')?.textContent === "3×3", doc.querySelector('[data-building="large_storage"] .size-chip')?.textContent || "missing");
+      doc.querySelector('[data-building="water_tank"]').click();
+      clickWorld(win, canvas, 31.5, 58.5);
+      await wait(300);
+      doc.querySelector('[data-building="timber_yard"]').click();
+      clickWorld(win, canvas, 34.5, 58.5);
+      await wait(300);
+      doc.querySelector('[data-building="stone_depot"]').click();
+      clickWorld(win, canvas, 37.5, 58.5);
+      await wait(300);
+      check("Dedicated stores each add 500 only to their matching resource", canvas.dataset.storageCapacityFood === "1100" && ["Water", "Wood", "Stone"].every(resource => canvas.dataset[`storageCapacity${resource}`] === "1100"), `${canvas.dataset.storageCapacityFood}/${canvas.dataset.storageCapacityWater}/${canvas.dataset.storageCapacityWood}/${canvas.dataset.storageCapacityStone}`);
+      doc.querySelector('[data-building="large_storage"]').click();
+      clickWorld(win, canvas, 48.5, 57.5);
+      await wait(450);
+      check("Large Storehouse adds 500 capacity to every resource", ["Food", "Water", "Wood", "Stone"].every(resource => canvas.dataset[`storageCapacity${resource}`] === "1600"), `${canvas.dataset.storageCapacityFood}/${canvas.dataset.storageCapacityWater}/${canvas.dataset.storageCapacityWood}/${canvas.dataset.storageCapacityStone}`);
 
       check("Wood Farm owns sixteen tracked plots", canvas.dataset.woodFarmPlots === "16", canvas.dataset.woodFarmPlots);
       const renewableBeforeWild = win.__wildrootTest.loggingTargetOrder(false, true, true);
