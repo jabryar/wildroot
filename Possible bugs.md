@@ -18,6 +18,9 @@ Checked 29 August 2026 after priority logging, villager movement, and seasonal-w
 - **Wood Farm trees could drift out of their plot centres while growing.** The 4 × 4 field grid and every seedling/tree now use the same evenly spaced centre coordinates.
 - **A Farm Barn could be orphaned by demolishing its Field Farm.** Farm demolition is now blocked unless every attached Barn still shares an edge with another Field Farm.
 - **Dedicated storage could increase the wrong resource capacity.** Food Barns, Water Tanks, Timber Yards and Stone Depots now use per-resource capacity entries, while the Large Storehouse adds its 500 capacity to all four resources.
+- **Large Storehouse progression could be bypassed too early.** It now stays locked until the village reaches 50 citizens; its storage regression scenario verifies the exact unlock threshold.
+- **River Pump sound could be confused with heavy industry.** It now has its own quiet 0.55-strength noise source with a one-tile radius, rather than using the five-tile industrial default.
+- **Starting another village could overwrite an unrelated settlement.** The start screen now exposes three separate local save slots. New games and imports replace only the selected slot; the original one-save key remains a compatible mirror of Slot 1.
 
 ## Remaining risks to monitor
 

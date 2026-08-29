@@ -99,6 +99,9 @@
           <button class="build-tab" data-category="decoration" type="button">Decorations</button>
         </div>
 
+        <label class="build-search-label" for="buildSearch">Find a building</label>
+        <input id="buildSearch" class="build-search" type="search" placeholder="Search buildings…" autocomplete="off" spellcheck="false">
+
         <div id="buildList" class="build-list" aria-live="polite"></div>
 
         <div class="tool-row">
@@ -248,6 +251,11 @@
             <button id="scenarioModeButton" class="start-mode-button" type="button" role="tab" aria-selected="false">Eight scenarios</button>
           </div>
 
+          <section class="save-slots" aria-labelledby="saveSlotsTitle">
+            <span id="saveSlotsTitle" class="eyebrow">VILLAGE SLOTS · UP TO 3</span>
+            <div id="saveSlotList" class="save-slot-list" aria-live="polite"></div>
+          </section>
+
           <div id="freeplaySetup">
             <label class="field-label" for="newVillageName">Name your settlement</label>
             <input id="newVillageName" class="text-input" maxlength="28" value="Mossbank Clearing" autocomplete="off">
@@ -278,7 +286,7 @@
             <button id="continueGameButton" class="secondary-button" type="button" hidden>Continue saved village</button>
             <button id="beginGameButton" class="primary-button" type="button">Begin a new village</button>
           </div>
-          <p class="local-note">Village, learning and achievement progress save in this browser.</p>
+          <p class="local-note">Each village slot, learning and achievement progress save in this browser.</p>
         </div>
       </section>
     </div>

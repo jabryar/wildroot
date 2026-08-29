@@ -8,6 +8,8 @@
   const WORLD_CENTER = WORLD_SIZE / 2;
   const DAY_LENGTH_MS = 180000;
   const SAVE_KEY = "wildroot-village-save-v1";
+  const SAVE_SLOT_PREFIX = "wildroot-village-save-v1-slot-";
+  const MAX_SAVE_SLOTS = 3;
   const ACHIEVEMENT_KEY = "wildroot-village-achievements-v1";
   const SAVE_VERSION = 2;
   const SEASON_LENGTH = 12;
@@ -253,6 +255,7 @@
       size: { w: 3, h: 3 },
       jobs: 0,
       storage: 500,
+      unlockPopulation: 50,
       impact: "medium",
       impactLabel: "+500 each",
       buildEco: { soil: -0.65, biodiversity: -0.16 },
@@ -322,11 +325,13 @@
       name: "River Pump",
       short: "↟",
       category: "village",
-      description: "Draws water from a neighbouring creek or river without building in the channel. Its screened intake causes only a small wildlife disturbance.",
+      description: "Draws water from a neighbouring creek or river without building in the channel. Its screened intake causes a small wildlife disturbance and a quiet one-tile pump hum.",
       cost: { wood: 16, stone: 10 },
       size: { w: 1, h: 1 },
       jobs: 0,
       waterIntake: true,
+      noise: 0.55,
+      noiseRange: 1,
       impact: "low",
       impactLabel: "−0.05 wildlife/day",
       dailyEco: { wildlife: -0.05 }
@@ -735,9 +740,10 @@
     }
   };
 
+  const BUILD_CATEGORY_ORDER = { village: 0, industry: 1, nature: 2, decoration: 3 };
   const BUILD_ORDER = Object.values(BUILDINGS)
     .filter(def => def.id !== "hearth")
-    .sort((a, b) => (a.unlockPopulation || 0) - (b.unlockPopulation || 0) || a.name.localeCompare(b.name))
+    .sort((a, b) => (BUILD_CATEGORY_ORDER[a.category] ?? 99) - (BUILD_CATEGORY_ORDER[b.category] ?? 99) || a.name.localeCompare(b.name))
     .map(def => def.id);
 
   function getNoisePollutionRange(buildingOrType) {
@@ -1621,6 +1627,7 @@
   let saveElapsed = 0;
   let mapMessageTimer = 0;
   let buildListSignature = "";
+  let activeSaveSlot = 1;
   let mapGesture = null;
   let treePriorityTimer = 0;
   let weatherVisualTime = 0;
@@ -4187,15 +4194,27 @@
     }
   }
 
+  function normaliseSaveSlot(slot) {
+    return clamp(Math.floor(Number(slot) || 1), 1, MAX_SAVE_SLOTS);
+  }
+
+  function getSaveSlotKey(slot = activeSaveSlot) {
+    return `${SAVE_SLOT_PREFIX}${normaliseSaveSlot(slot)}`;
+  }
+
   function saveGame() {
     if (!state || !gameActive) return;
     try {
       captureLearningProgress();
-      localStorage.setItem(SAVE_KEY, JSON.stringify(state));
+      const serialised = JSON.stringify(state);
+      localStorage.setItem(getSaveSlotKey(), serialised);
+      // Keep the original key as a Slot 1 mirror so existing local villages,
+      // exports, and older builds remain compatible.
+      if (activeSaveSlot === 1) localStorage.setItem(SAVE_KEY, serialised);
       if (dom.autosaveStatus) {
-        dom.autosaveStatus.textContent = "Saved just now";
+        dom.autosaveStatus.textContent = `Slot ${activeSaveSlot} saved just now`;
         window.setTimeout(() => {
-          if (dom.autosaveStatus) dom.autosaveStatus.textContent = "Saved locally";
+          if (dom.autosaveStatus) dom.autosaveStatus.textContent = `Slot ${activeSaveSlot} saved locally`;
         }, 1400);
       }
     } catch (error) {
@@ -4204,9 +4223,11 @@
     }
   }
 
-  function readSavedGame() {
+  function readSavedGame(slot = activeSaveSlot) {
     try {
-      const raw = localStorage.getItem(SAVE_KEY);
+      const selectedSlot = normaliseSaveSlot(slot);
+      const raw = localStorage.getItem(getSaveSlotKey(selectedSlot))
+        || (selectedSlot === 1 ? localStorage.getItem(SAVE_KEY) : null);
       return raw ? JSON.parse(raw) : null;
     } catch {
       return null;
@@ -4242,7 +4263,7 @@
         const compatible = (imported?.version === SAVE_VERSION && Array.isArray(imported.buildings))
           || (imported?.version === 1 && Array.isArray(imported.tiles));
         if (!compatible) throw new Error("Not a compatible Wildroot save.");
-        if (!window.confirm(`Replace the current village with “${imported.villageName || "this imported village"}”?`)) return;
+        if (!window.confirm(`Replace Slot ${activeSaveSlot}'s current village with “${imported.villageName || "this imported village"}”?`)) return;
         state = normaliseLoadedState(imported);
         state.paused = true;
         gameActive = true;
@@ -5289,6 +5310,7 @@
   }
 
   function showStartScreen() {
+    if (gameActive) saveGame();
     gameActive = false;
     selectedBuilding = null;
     selectedRotation = 0;
@@ -5297,6 +5319,25 @@
     const saved = readSavedGame();
     dom.modalLayer.innerHTML = "";
     dom.modalLayer.appendChild(document.getElementById("startScreenTemplate").content.cloneNode(true));
+    const saveSlotList = document.getElementById("saveSlotList");
+    const slotSaves = Array.from({ length: MAX_SAVE_SLOTS }, (_, index) => readSavedGame(index + 1));
+    saveSlotList.innerHTML = slotSaves.map((slotSave, index) => {
+      const slot = index + 1;
+      const active = slot === activeSaveSlot;
+      const detail = slotSave
+        ? `${slotSave.villageName || "Unnamed village"} · Day ${slotSave.day || 1}${slotSave.gameOver ? " · ended" : ""}`
+        : "Empty slot · start a new village here";
+      const slotScore = slotSave?.ecosystem && Object.keys(slotSave.ecosystem).length ? Math.round(ecosystemScore(slotSave.ecosystem)) : 0;
+      return `<button class="save-slot ${active ? "active" : ""}" type="button" data-save-slot="${slot}" aria-pressed="${active}"><strong>SLOT ${slot}</strong><span><strong>${escapeHtml(detail)}</strong><small>${slotSave ? `${Math.floor(slotSave.population || 0)} people · ${slotScore}% ecosystem` : "Available for a separate village"}</small></span><em>${active ? "Selected" : slotSave ? "Open" : "Empty"}</em></button>`;
+    }).join("");
+    saveSlotList.addEventListener("click", event => {
+      const button = event.target.closest("[data-save-slot]");
+      if (!button) return;
+      const nextSlot = normaliseSaveSlot(button.dataset.saveSlot);
+      if (nextSlot === activeSaveSlot) return;
+      activeSaveSlot = nextSlot;
+      showStartScreen();
+    });
     const continueButton = document.getElementById("continueGameButton");
     if (saved && !saved.gameOver) {
       continueButton.hidden = false;
@@ -5345,12 +5386,12 @@
     document.getElementById("scenarioList").addEventListener("click", event => {
       const button = event.target.closest("[data-scenario]");
       if (!button) return;
-      if (saved && !window.confirm("Begin this scenario and replace the current local save? Achievements will be kept.")) return;
+      if (saved && !window.confirm(`Begin this scenario and replace Slot ${activeSaveSlot}'s current village? Achievements will be kept.`)) return;
       startScenario(button.dataset.scenario);
     });
 
     beginButton.addEventListener("click", () => {
-      if (saved && !window.confirm("Begin a new village and replace the current local save? Achievements will be kept.")) return;
+      if (saved && !window.confirm(`Begin a new village and replace Slot ${activeSaveSlot}'s current village? Achievements will be kept.`)) return;
       const nameInput = document.getElementById("newVillageName");
       const difficulty = document.querySelector('input[name="difficulty"]:checked')?.value || "balanced";
       const name = nameInput.value.trim() || "Mossbank Clearing";
@@ -5516,6 +5557,7 @@
             <button id="exportMenuButton" class="secondary-button" type="button">Export save</button>
             <button id="importMenuButton" class="secondary-button" type="button">Import save</button>
             <input id="importSaveInput" type="file" accept="application/json,.json" hidden>
+            <button id="switchSlotMenuButton" class="secondary-button" type="button">Switch village slot</button>
             ${state.placementTutorialCompleted ? "" : '<button id="tutorialMenuButton" class="secondary-button" type="button">Building tutorial</button>'}
             <button id="blogMenuButton" class="secondary-button" type="button">Village blog</button>
             <button id="fieldGuideMenuButton" class="secondary-button" type="button">Environmental field guide</button>
@@ -5534,6 +5576,7 @@
     document.getElementById("exportMenuButton").addEventListener("click", exportSaveFile);
     document.getElementById("importMenuButton").addEventListener("click", () => document.getElementById("importSaveInput").click());
     document.getElementById("importSaveInput").addEventListener("change", event => importSaveFile(event.target.files?.[0]));
+    document.getElementById("switchSlotMenuButton").addEventListener("click", showStartScreen);
     document.getElementById("tutorialMenuButton")?.addEventListener("click", () => showPlacementTutorial(false, true));
     document.getElementById("blogMenuButton").addEventListener("click", () => showBlog(true));
     document.getElementById("fieldGuideMenuButton").addEventListener("click", () => showFieldGuide(() => openMenu(true)));
@@ -5865,8 +5908,13 @@
   function renderBuildList() {
     if (!dom.buildList || !state) return;
     const category = document.querySelector(".build-tab.active")?.dataset.category || "all";
-    const visibleTypes = BUILD_ORDER.filter(type => category === "all" || BUILDINGS[type].category === category);
-    const nextSignature = `${category}|${visibleTypes.map(type => {
+    const searchTerm = (dom.buildSearch?.value || "").trim().toLocaleLowerCase();
+    const visibleTypes = BUILD_ORDER.filter(type => {
+      const def = BUILDINGS[type];
+      if (!searchTerm && category !== "all" && def.category !== category) return false;
+      return !searchTerm || `${def.name} ${def.description} ${def.impactLabel} ${buildingOutputDescription(type)}`.toLocaleLowerCase().includes(searchTerm);
+    });
+    const nextSignature = `${category}|${searchTerm}|${visibleTypes.map(type => {
       const def = BUILDINGS[type];
       return `${type}:${buildingUnlocked(def) ? 1 : 0}:${canAfford(def.cost) ? 1 : 0}`;
     }).join("|")}`;
@@ -5875,7 +5923,7 @@
     // Replacing hovered buttons every UI tick cancels pointer clicks and restarts CSS fades.
     if (nextSignature === buildListSignature) return;
     buildListSignature = nextSignature;
-    dom.buildList.innerHTML = visibleTypes
+    dom.buildList.innerHTML = visibleTypes.length ? visibleTypes
       .map(type => {
         const def = BUILDINGS[type];
         const unlocked = buildingUnlocked(def);
@@ -5898,7 +5946,7 @@
             <span class="build-costs">${costs}<span class="impact-chip ${def.impact === "heavy" || def.impact === "medium" ? "harmful" : ""}">${escapeHtml(def.impactLabel)}</span></span>
           </span>
         </button>`;
-      }).join("");
+      }).join("") : `<p class="build-empty">No buildings match “${escapeHtml(searchTerm)}”.</p>`;
   }
 
   function renderResources() {
@@ -6195,6 +6243,8 @@
   }
 
   function updateWorldDataAttributes() {
+    dom.gameCanvas.dataset.activeSaveSlot = String(activeSaveSlot);
+    dom.gameCanvas.dataset.maxSaveSlots = String(MAX_SAVE_SLOTS);
     const cropSites = state.buildings.filter(building => ["farm", "orchard"].includes(building.type));
     const farms = state.buildings.filter(building => building.type === "farm");
     const rainGardens = state.buildings.filter(building => building.type === "rain_garden");
@@ -8259,7 +8309,7 @@
     const ids = [
       "villageName", "seasonIcon", "dayLabel", "clockLabel", "weatherLabel", "pauseButton", "achievementsButton", "achievementCount", "menuButton",
       "populationValue", "populationTrend", "foodValue", "foodTrend", "waterValue", "waterTrend", "woodValue", "woodTrend", "stoneValue", "stoneTrend", "ecosystemValue", "ecosystemTrend",
-      "buildList", "collapseBuildButton", "inspectTool", "demolishTool", "treePriorityTool", "selectionSwatch", "selectionLabel", "autosaveStatus", "mapFrame", "gameCanvas", "placementGuide", "placementGuideStep", "placementGuideTitle", "placementGuideText", "placementGuideWhy", "placementGuideSpot", "placementGuideAction", "placementGuideSkip", "descriptionToggle", "tileTooltip", "mapMessage",
+      "buildList", "buildSearch", "collapseBuildButton", "inspectTool", "demolishTool", "treePriorityTool", "selectionSwatch", "selectionLabel", "autosaveStatus", "mapFrame", "gameCanvas", "placementGuide", "placementGuideStep", "placementGuideTitle", "placementGuideText", "placementGuideWhy", "placementGuideSpot", "placementGuideAction", "placementGuideSkip", "descriptionToggle", "tileTooltip", "mapMessage",
       "zoomInButton", "zoomOutButton", "centerMapButton", "zoomLabel",
       "workersLabel", "familiesLabel", "footprintLabel", "footprintFill", "coordinatesLabel", "ecoBadge", "ecoRing", "ecoRingValue", "ecoSummary", "ecoMetrics",
       "learningProgress", "ecoCoachIcon", "ecoCoachMetric", "ecoCoachText", "ecoCoachPressure", "ecoCoachSupport", "ecoCoachConnection", "fieldGuideButton",
@@ -8284,6 +8334,7 @@
       document.querySelectorAll(".build-tab").forEach(tab => tab.classList.toggle("active", tab === button));
       renderBuildList();
     }));
+    dom.buildSearch.addEventListener("input", renderBuildList);
     dom.buildList.addEventListener("click", event => {
       const button = event.target.closest("[data-building]");
       if (button && !button.disabled) selectBuilding(button.dataset.building);
@@ -8725,10 +8776,10 @@
         if (!index) return true;
         const previous = BUILDINGS[BUILD_ORDER[index - 1]];
         const current = BUILDINGS[type];
-        const previousRequirement = previous.unlockPopulation || 0;
-        const currentRequirement = current.unlockPopulation || 0;
-        return previousRequirement < currentRequirement
-          || previousRequirement === currentRequirement && previous.name.localeCompare(current.name) <= 0;
+        const previousCategory = BUILD_CATEGORY_ORDER[previous.category] ?? 99;
+        const currentCategory = BUILD_CATEGORY_ORDER[current.category] ?? 99;
+        return previousCategory < currentCategory
+          || previousCategory === currentCategory && previous.name.localeCompare(current.name) <= 0;
       });
       const everyScenarioKeepsChannels = SCENARIOS.every(scenario => {
         const scenarioState = createScenarioState(scenario.id);
@@ -8777,7 +8828,7 @@
         ["Unbridged water blocks villagers and ordinary buildings", unbridgedWaterBlocked && ordinaryBuildingBlockedByWater],
         ["Waterways and bridges survive a save reload", waterwaysAndBridgesPersist],
         ["Every prebuilt scenario keeps its saved channels clear", everyScenarioKeepsChannels],
-        ["Plans are sorted by citizens required, then alphabetically", buildOrderSorted],
+        ["Plans are grouped by category, then alphabetically", buildOrderSorted],
         ["A cleared fire stump opens adjacent treeless scar, but never water", fireScarClearingWorks]
       ];
       const passed = checks.every(([, pass]) => pass);

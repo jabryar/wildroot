@@ -383,12 +383,50 @@ input:focus-visible {
   background: rgba(104, 163, 103, 0.15);
 }
 
+.build-search-label {
+  display: block;
+  margin: 0 2px 5px;
+  color: var(--faint);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+.build-search {
+  width: 100%;
+  margin-bottom: 9px;
+  padding: 8px 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  outline: none;
+  background: rgba(4, 20, 15, .46);
+  color: var(--ink);
+  font: 12px Georgia, serif;
+}
+
+.build-search::placeholder {
+  color: var(--faint);
+}
+
+.build-search:focus {
+  border-color: rgba(143, 205, 133, .7);
+  box-shadow: 0 0 0 2px rgba(104, 163, 103, .16);
+}
+
 .build-list {
   min-height: 0;
   padding-right: 3px;
   overflow-y: auto;
   scrollbar-width: thin;
   scrollbar-color: rgba(128, 170, 132, 0.25) transparent;
+}
+
+.build-empty {
+  margin: 10px 4px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .build-item {
@@ -1342,6 +1380,60 @@ kbd {
   color: var(--ink);
   background: rgba(112, 173, 105, .16);
   box-shadow: inset 0 0 0 1px rgba(148, 207, 133, .2);
+}
+
+.save-slots {
+  margin: -4px 0 18px;
+}
+
+.save-slot-list {
+  display: grid;
+  gap: 5px;
+  margin-top: 7px;
+}
+
+.save-slot {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 48px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  background: rgba(4, 20, 15, .34);
+  cursor: pointer;
+  text-align: left;
+}
+
+.save-slot:hover,
+.save-slot.active {
+  border-color: rgba(143, 205, 133, .48);
+  background: rgba(104, 163, 103, .12);
+  color: var(--ink);
+}
+
+.save-slot strong,
+.save-slot small,
+.save-slot em {
+  display: block;
+}
+
+.save-slot strong {
+  font-size: 10px;
+}
+
+.save-slot small {
+  margin-top: 2px;
+  color: var(--faint);
+  font-size: 9px;
+}
+
+.save-slot em {
+  color: var(--green-bright);
+  font-size: 9px;
+  font-style: normal;
 }
 
 .field-label,
@@ -2341,6 +2433,8 @@ kbd {
 
 .build-panel.collapsed .panel-heading > div,
 .build-panel.collapsed .build-tabs,
+.build-panel.collapsed .build-search-label,
+.build-panel.collapsed .build-search,
 .build-panel.collapsed .build-list,
 .build-panel.collapsed .tool-row {
   display: none;

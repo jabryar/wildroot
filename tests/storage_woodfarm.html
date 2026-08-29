@@ -28,8 +28,8 @@
     weatherBlend: 1,
     nextWeatherChange: 99,
     nextEventDay: 100,
-    population: 12,
-    demographics: { children: 0, adults: 12, elders: 0 },
+    population: 50,
+    demographics: { children: 0, adults: 50, elders: 0 },
     resources: { food: 450, water: 180, wood: 300, stone: 300 },
     terrainSeed: 12873465,
     buildings: [
@@ -67,9 +67,18 @@
     const check = (name, pass, detail = "") => checks.push({ name, pass: Boolean(pass), detail });
     try {
       await wait(250);
+      check("Start screen exposes three independent village slots", doc.querySelectorAll("[data-save-slot]").length === 3 && doc.querySelector('[data-save-slot="1"]')?.classList.contains("active"), `${doc.querySelectorAll("[data-save-slot]").length} slots`);
       doc.getElementById("continueGameButton").click();
       await wait(500);
       const canvas = doc.getElementById("gameCanvas");
+      check("Active slot diagnostics identify Slot 1 and the three-slot limit", canvas.dataset.activeSaveSlot === "1" && canvas.dataset.maxSaveSlots === "3", `${canvas.dataset.activeSaveSlot}/${canvas.dataset.maxSaveSlots}`);
+
+      const buildSearch = doc.getElementById("buildSearch");
+      buildSearch.value = "water tank";
+      buildSearch.dispatchEvent(new win.Event("input", { bubbles: true }));
+      check("Building search finds items across categories", doc.querySelectorAll("[data-building]").length === 1 && doc.querySelector('[data-building="water_tank"]')?.textContent.includes("Water Tank"), doc.querySelector("#buildList").textContent.trim());
+      buildSearch.value = "";
+      buildSearch.dispatchEvent(new win.Event("input", { bubbles: true }));
 
       check("Storehouse is a 2x2 building", doc.querySelector('[data-building="storage"] .size-chip')?.textContent === "2×2", doc.querySelector('[data-building="storage"] .size-chip')?.textContent || "missing");
       check("Wood Farm is a 4x4 building", doc.querySelector('[data-building="wood_farm"] .size-chip')?.textContent === "4×4", doc.querySelector('[data-building="wood_farm"] .size-chip')?.textContent || "missing");
@@ -97,7 +106,7 @@
       check("A second Field Farm attached to the Barn allows the first Farm to be removed", win.__wildrootTest.farmBarnRemovalBlockers(4) === 0, String(win.__wildrootTest.farmBarnRemovalBlockers(4)));
 
       check("Water Tank, Timber Yard and Stone Depot are 2x2", ["water_tank", "timber_yard", "stone_depot"].every(type => doc.querySelector(`[data-building="${type}"] .size-chip`)?.textContent === "2×2"), ["water_tank", "timber_yard", "stone_depot"].map(type => doc.querySelector(`[data-building="${type}"] .size-chip`)?.textContent || "missing").join("/"));
-      check("Large Storehouse is 3x3", doc.querySelector('[data-building="large_storage"] .size-chip')?.textContent === "3×3", doc.querySelector('[data-building="large_storage"] .size-chip')?.textContent || "missing");
+      check("Large Storehouse is a 3x3 building unlocked at 50 citizens", doc.querySelector('[data-building="large_storage"] .size-chip')?.textContent === "3×3" && !doc.querySelector('[data-building="large_storage"]')?.disabled, doc.querySelector('[data-building="large_storage"] .size-chip')?.textContent || "missing");
       doc.querySelector('[data-building="water_tank"]').click();
       clickWorld(win, canvas, 31.5, 58.5);
       await wait(300);
