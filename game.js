@@ -98,6 +98,8 @@
   const TREE_TIMBER_MIN = 5;
   const TREE_TIMBER_MAX = 10;
   const BURNED_TREE_TIMBER_MULTIPLIER = 0.7;
+  const DRY_RIVER_GUSH_DELAY_DAYS = 1 / 24;
+  const DRY_RIVER_FLOW_DURATION_DAYS = 3 / 24;
   const AFTER_FIRE_BURNED_TREE_SHARE = 0.7;
   const TREE_PRIORITY_HOLD_MS = 650;
   const WOOD_FARM_PLOTS = 16;
@@ -1315,6 +1317,7 @@
       happiness: 62,
       resources: { food: 136, water: 54, wood: 128, stone: 96 },
       ecosystem: { forest: 78, wildlife: 69, water: 44, soil: 61, air: 88, biodiversity: 67 },
+      dryRiverRefillAt: 30,
       brief: "A summer drought has exposed the riverbed. Rebuild the village around captured rain before its wells and wetlands fail.",
       learningGoal: "Watershed limits: compare extraction with recharge and use nature-based systems to slow, store and clean rainfall.",
       buildings: [
@@ -1690,6 +1693,21 @@
 
   function getWaterwayType(x, y) {
     return getWaterwayTypeForState(state, x, y);
+  }
+
+  function areScenarioWaterwaysDry(target = state) {
+    const scenario = SCENARIOS.find(item => item.id === target?.scenarioId);
+    return scenario?.id === "dry_river" && target?.dryRiverRefilled !== true;
+  }
+
+  function getDryRiverFlowProgress(target = state) {
+    if (areScenarioWaterwaysDry(target) || !Number.isFinite(Number(target?.dryRiverGushStartedAt))) return 0;
+    return clamp((getWorldTime(target) - target.dryRiverGushStartedAt) / DRY_RIVER_FLOW_DURATION_DAYS, 0, 1);
+  }
+
+  function isScenarioWaterwayDryAt(x, y, target = state) {
+    const scenario = SCENARIOS.find(item => item.id === target?.scenarioId);
+    return scenario?.id === "dry_river" && (areScenarioWaterwaysDry(target) || getDryRiverFlowProgress(target) < (y + 1) / WORLD_SIZE);
   }
 
   function getTerrainLabel(x, y, target = state) {
@@ -2225,6 +2243,9 @@
     nextState.waterways = {};
     nextState.waterwaysInitialised = false;
     nextState.scenarioId = scenario.id;
+    nextState.dryRiverRefilled = false;
+    nextState.dryRiverStormStartedAt = null;
+    nextState.dryRiverGushStartedAt = null;
     nextState.rng = scenario.seed ^ 0xa53c9e17;
     nextState.weatherStartedAt = getWorldTime(nextState);
     nextState.weatherDurationDays = weatherDurationFromRoll(scenario.weather, seededNoise(11, 37, scenario.seed));
@@ -3751,7 +3772,7 @@
           rates.water += 29 * active * weather.waterOutput * waterFactor * marketBoost;
           break;
         case "river_pump":
-          rates.water += 24 * active * marketBoost;
+          if (!areScenarioWaterwaysDry()) rates.water += 24 * active * marketBoost;
           break;
         case "lumber":
           if (includeDiscreteLoggingForecast) rates.wood += getProjectedLoggingTimberRate(building, state, staffedProductionActive);
@@ -3979,6 +4000,7 @@
       onNewDay();
     }
     updateWeatherSystem(deltaDays);
+    updateDryRiverScenario();
     updateRandomEventSystem();
 
     trackEcoStats();
@@ -4079,6 +4101,30 @@
     }
     if (!Number.isFinite(Number(state.nextWeatherChange))) scheduleNextWeatherChange(state.weather);
     if (getWorldTime() >= state.nextWeatherChange && state.weatherBlend >= 1) beginWeatherTransition(chooseWeatherId());
+  }
+
+  function updateDryRiverScenario() {
+    const scenario = getActiveScenario();
+    if (scenario?.id !== "dry_river" || state.dryRiverRefilled === true || getWorldTime() < scenario.dryRiverRefillAt) return;
+    if (state.dryRiverStormStartedAt === null || !Number.isFinite(Number(state.dryRiverStormStartedAt))) {
+      state.dryRiverStormStartedAt = getWorldTime();
+      state.weather = "storm";
+      state.weatherFrom = "storm";
+      state.weatherBlend = 1;
+      state.weatherStartedAt = state.dryRiverStormStartedAt;
+      state.weatherDurationDays = 1;
+      state.nextWeatherChange = state.weatherStartedAt + state.weatherDurationDays;
+      addLog("A massive autumn thunderstorm has struck the upper catchment. The dry channels are still waiting for the runoff to arrive.", true);
+      showToast("Thunderstorm upstream", "Runoff will reach the dry river and creeks in one in-game hour.", "ϟ");
+      return;
+    }
+    if (getWorldTime() - state.dryRiverStormStartedAt < DRY_RIVER_GUSH_DELAY_DAYS) return;
+    state.dryRiverRefilled = true;
+    state.dryRiverGushStartedAt = getWorldTime();
+    storeResource("water", 60);
+    applyEcoEffect({ water: 7, soil: 1.4, wildlife: 0.8, biodiversity: 0.7 });
+    addLog("Runoff is gushing in from upstream, refilling the Dry River and creeks. The channel is flowing again, but the storm tests every exposed bank.", true);
+    showToast("Runoff arrives", "Water is gushing downstream and has restored 60 stored water.", "ϟ");
   }
 
   function addLog(text, important = false) {
@@ -5923,6 +5969,7 @@
     // Replacing hovered buttons every UI tick cancels pointer clicks and restarts CSS fades.
     if (nextSignature === buildListSignature) return;
     buildListSignature = nextSignature;
+    dom.buildList.scrollLeft = 0;
     dom.buildList.innerHTML = visibleTypes.length ? visibleTypes
       .map(type => {
         const def = BUILDINGS[type];
@@ -6275,6 +6322,11 @@
     dom.gameCanvas.dataset.fireScarTilesCleared = String(state.stats.fireScarTilesCleared || 0);
     dom.gameCanvas.dataset.waterwaysInitialised = String(state.waterwaysInitialised === true);
     dom.gameCanvas.dataset.riverTiles = String(waterwayTypes.filter(type => type === "river").length);
+    dom.gameCanvas.dataset.riverDry = String(areScenarioWaterwaysDry());
+    dom.gameCanvas.dataset.creeksDry = String(areScenarioWaterwaysDry());
+    dom.gameCanvas.dataset.dryRiverRefillAt = String(getActiveScenario()?.dryRiverRefillAt || "");
+    dom.gameCanvas.dataset.dryRiverGushDelayHours = String(DRY_RIVER_GUSH_DELAY_DAYS * 24);
+    dom.gameCanvas.dataset.dryRiverFlowProgress = getDryRiverFlowProgress().toFixed(3);
     dom.gameCanvas.dataset.creekTiles = String(waterwayTypes.filter(type => type === "creek").length);
     dom.gameCanvas.dataset.waterwaysFrozen = String(waterwaysFrozen);
     dom.gameCanvas.dataset.frozenRiverTiles = String(waterwaysFrozen ? waterwayTypes.filter(type => type === "river").length : 0);
@@ -6819,7 +6871,8 @@
       const waterway = getWaterwayType(point.x, point.y);
       const crossing = waterway === "river" ? "River Bridge" : "Creek Footbridge";
       const frozen = areWaterwaysFrozen();
-      html = `<strong>${frozen ? "Frozen " : ""}${waterway === "river" ? "river channel" : "forest creek"}</strong><span>World tile ${point.x + 1}, ${point.y + 1} · ${waterway === "river" ? "three-tile-wide main channel" : "one-tile tributary"}${frozen ? " · winter ice" : ""}</span><span class="tooltip-impact">${frozen ? "Ice may hide moving water and uneven thickness" : "Blocks ordinary walking and construction"} · clear both banks and use a ${crossing} · keeping water connected supports downstream habitat</span>`;
+      const dryWaterway = isScenarioWaterwayDryAt(point.x, point.y);
+      html = `<strong>${dryWaterway ? waterway === "river" ? "Exposed riverbed" : "Dry creek bed" : frozen ? "Frozen " : ""}${dryWaterway ? "" : waterway === "river" ? "river channel" : "forest creek"}</strong><span>World tile ${point.x + 1}, ${point.y + 1} · ${waterway === "river" ? "three-tile-wide main channel" : "one-tile tributary"}${dryWaterway ? " · waiting for autumn rain" : frozen ? " · winter ice" : ""}</span><span class="tooltip-impact">${dryWaterway ? "The drought has dried this protected channel; the autumn thunderstorm will refill it" : frozen ? "Ice may hide moving water and uneven thickness" : "Blocks ordinary walking and construction"} · clear both banks and use a ${crossing} · keeping water connected supports downstream habitat</span>`;
     } else if (isStandingTree(point.x, point.y)) {
       const prioritized = Boolean(state.priorityTrees?.[tileIndex(point.x, point.y)]);
       const inFastZone = state.buildings.some(camp => camp.type === "lumber" && isTreeInLoggingRange(camp, point.x, point.y));
@@ -7047,6 +7100,22 @@
   function drawWaterwayTile(ctx, x, y, screen, scale, type, seasonId, weatherId, variation) {
     const frozen = seasonId === "winter";
     const river = type === "river";
+    const dryWaterway = isScenarioWaterwayDryAt(x, y);
+    if (dryWaterway) {
+      ctx.fillStyle = variation > 0.5 ? "#765b3d" : "#6b5237";
+      ctx.fillRect(screen.x, screen.y, scale + 0.5, scale + 0.5);
+      ctx.strokeStyle = "rgba(194,157,99,.42)";
+      ctx.lineWidth = Math.max(0.55, scale * 0.035);
+      ctx.beginPath();
+      const crackX = screen.x + scale * (0.25 + variation * 0.45);
+      ctx.moveTo(crackX - scale * 0.16, screen.y + scale * 0.22);
+      ctx.lineTo(crackX, screen.y + scale * 0.52);
+      ctx.lineTo(crackX + scale * 0.13, screen.y + scale * 0.8);
+      ctx.moveTo(crackX, screen.y + scale * 0.52);
+      ctx.lineTo(crackX - scale * 0.17, screen.y + scale * 0.68);
+      ctx.stroke();
+      return;
+    }
     ctx.fillStyle = frozen
       ? river ? variation > 0.5 ? "#7da4ad" : "#749aa5" : variation > 0.5 ? "#8ab2b4" : "#82aaae"
       : river ? variation > 0.5 ? "#245d6c" : "#205565" : variation > 0.5 ? "#33727a" : "#2c6871";

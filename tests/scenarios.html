@@ -42,6 +42,9 @@
         check(`${data.name} four goals`, doc.querySelectorAll(".scenario-goal").length === 4, doc.querySelectorAll(".scenario-goal").length);
         check(`${data.name} includes an educational focus`, (doc.querySelector("[data-scenario-learning]")?.textContent || "").includes("Learning focus") && (doc.querySelector("[data-scenario-learning]")?.textContent || "").length > 70, doc.querySelector("[data-scenario-learning]")?.textContent || "missing");
         check(`${data.name} shows the universal collapse rule`, (doc.querySelector(".scenario-briefing")?.textContent || "").includes("below 5% overall") && (doc.querySelector(".scenario-briefing")?.textContent || "").includes("indicator reaches 0%"));
+        if (id === "dry_river") {
+          check("The Dry River starts with dry river and creek beds and schedules its autumn refill", canvas.dataset.riverDry === "true" && canvas.dataset.creeksDry === "true" && canvas.dataset.dryRiverRefillAt === "30" && canvas.dataset.dryRiverGushDelayHours === "1", `${canvas.dataset.riverDry}/${canvas.dataset.creeksDry} · Day ${canvas.dataset.dryRiverRefillAt} · ${canvas.dataset.dryRiverGushDelayHours}h delay`);
+        }
         if (id === "burned_watershed") {
           check("After the Fire creates permanent black leafless trees", Number(canvas.dataset.burnedTreeCount) > 0 && canvas.dataset.burnedTreeLeafState === "permanent-leafless" && canvas.dataset.burnedTreeColour === "black", `${canvas.dataset.burnedTreeCount} trees · ${canvas.dataset.burnedTreeLeafState} · ${canvas.dataset.burnedTreeColour}`);
           let burnedTree = null;

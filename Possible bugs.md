@@ -21,6 +21,9 @@ Checked 29 August 2026 after priority logging, villager movement, and seasonal-w
 - **Large Storehouse progression could be bypassed too early.** It now stays locked until the village reaches 50 citizens; its storage regression scenario verifies the exact unlock threshold.
 - **River Pump sound could be confused with heavy industry.** It now has its own quiet 0.55-strength noise source with a one-tile radius, rather than using the five-tile industrial default.
 - **Starting another village could overwrite an unrelated settlement.** The start screen now exposes three separate local save slots. New games and imports replace only the selected slot; the original one-save key remains a compatible mirror of Slot 1.
+- **Building cards could scroll sideways and clip their icon or first words.** Build cards and the search field now use border-box sizing, build costs wrap, and the list blocks horizontal scrolling.
+- **The Dry River scenario could show flowing water during its drought.** Its river and creeks now render as exposed protected beds until the scheduled Day 30 autumn thunderstorm refills them; River Pumps remain inactive until then.
+- **Autumn runoff could appear instantly despite an upstream storm.** The Dry River now waits one in-game hour after the thunderstorm, then renders water flowing downstream over three in-game hours using simulation time, so the sequence scales with game speed.
 
 ## Remaining risks to monitor
 

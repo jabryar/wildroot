@@ -15,6 +15,8 @@ All original survival, ecosystem, building, weather, population, storage and for
 
 Learning and knowledge-check progress save with the current village. The start screen supports three separate village slots; Slot 1 automatically keeps compatibility with an existing single-village local save, and import/export works with the selected slot.
 
+In the **Dry River** scenario, the main river and both creeks begin as exposed dry beds, and River Pumps cannot draw water. A one-day major thunderstorm arrives at the midpoint of autumn (Day 30); one in-game hour later, runoff visibly gushes downstream from the upstream edge over the next three in-game hours. It refills every channel, restores 60 stored water, and provides a short water, soil, wildlife and biodiversity recovery boost. The delay and flow use simulation time, so they scale with 1×, 2× and 3× speed.
+
 ## Controls
 
 - Explore a 100 × 100 forest world with an irregular buildable clearing.
