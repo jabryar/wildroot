@@ -24,6 +24,8 @@
   const TRAVELLER_LIFESPAN_MAX_DAYS = 40;
   const EVENT_MIN_GAP_DAYS = 1 / 3;
   const EVENT_MAX_GAP_DAYS = 7;
+  const CITY_TRADE_DURATION_DAYS = 3;
+  const CITY_TRADE_AMOUNT = 25;
   const ECOSYSTEM_COLLAPSE_THRESHOLD = 5;
   const PERFECT_ECOSYSTEM_DISPLAY_THRESHOLD = 99.5;
 
@@ -66,6 +68,14 @@
     { id: "autumn", name: "Autumn", icon: "🍂", farm: 1, waterUse: 1, color: "#d28a55" },
     { id: "winter", name: "Winter", icon: "❄", farm: 0.38, waterUse: 0.88, color: "#9cc4c8" }
   ];
+
+  const CITY_MARKET_PRICES = {
+    food: { spring: 1, summer: 0.7, autumn: 1.2, winter: 1.8 },
+    water: { spring: 0.75, summer: 1.35, autumn: 0.9, winter: 0.8 },
+    wood: { spring: 0.9, summer: 0.85, autumn: 1.05, winter: 1.4 },
+    stone: { spring: 0.95, summer: 1, autumn: 1.05, winter: 1.1 }
+  };
+  const CITY_RESOURCE_LABELS = { food: "Food", water: "Water", wood: "Timber", stone: "Stone" };
 
   const WEATHERS = {
     mild: { id: "mild", name: "Mild skies", icon: "○", food: 1, waterOutput: 1, wood: 1, eco: {}, duration: { minDays: 1, maxDays: 2.5, typicalDays: 1.75 } },
@@ -525,7 +535,7 @@
       name: "Village Market",
       short: "◇",
       category: "village",
-      description: "Improves distribution and happiness, making producers more efficient.",
+      description: "Improves distribution and happiness, makes producers more efficient, and unlocks three-day city caravans for seasonal trade.",
       cost: { wood: 28, stone: 18 },
       size: { w: 3, h: 3 },
       jobs: 2,
@@ -2154,6 +2164,9 @@
         wood: 95 * resource,
         stone: 60 * resource
       },
+      coins: 0,
+      cityTrades: [],
+      nextCityTradeId: 1,
       ecosystem,
       terrainSeed: seed ^ 0x6d2b79f5,
       buildings: [],
@@ -2332,6 +2345,25 @@
     if (loaded.version !== SAVE_VERSION || !Array.isArray(loaded.buildings)) return fallback;
     const merged = { ...fallback, ...loaded };
     merged.resources = { ...fallback.resources, ...(loaded.resources || {}) };
+    merged.coins = Math.max(0, Math.floor(Number(loaded.coins) || 0));
+    merged.cityTrades = Array.isArray(loaded.cityTrades)
+      ? loaded.cityTrades.filter(trade => {
+        const resource = String(trade?.resource || "");
+        return ["buy", "sell"].includes(trade?.direction)
+          && Object.prototype.hasOwnProperty.call(CITY_RESOURCE_LABELS, resource)
+          && Number.isFinite(Number(trade?.amount))
+          && Number.isFinite(Number(trade?.coins))
+          && Number.isFinite(Number(trade?.dueAt));
+      }).map(trade => ({
+        id: Math.max(1, Math.floor(Number(trade.id) || 1)),
+        direction: trade.direction,
+        resource: trade.resource,
+        amount: Math.max(1, Math.floor(Number(trade.amount))),
+        coins: Math.max(0, Math.floor(Number(trade.coins))),
+        dueAt: Number(trade.dueAt),
+        sentAt: Number.isFinite(Number(trade.sentAt)) ? Number(trade.sentAt) : Number(trade.dueAt) - CITY_TRADE_DURATION_DAYS
+      })) : [];
+    merged.nextCityTradeId = Math.max(1, Math.floor(Number(loaded.nextCityTradeId) || 1), ...merged.cityTrades.map(trade => trade.id + 1));
     merged.ecosystem = { ...fallback.ecosystem, ...(loaded.ecosystem || {}) };
     merged.stats = { ...fallback.stats, ...(loaded.stats || {}) };
     merged.buffs = { ...(loaded.buffs || {}) };
@@ -2531,6 +2563,87 @@
     const after = clamp(before + amount, 0, capacity);
     target.resources[resource] = after;
     return after - before;
+  }
+
+  function isCityMarketUnlocked(target = state) {
+    return Boolean(target?.buildings?.some(building => building.type === "market"));
+  }
+
+  function getCityMarketPrice(resource, seasonId = getSeason().id) {
+    return Number(CITY_MARKET_PRICES[resource]?.[seasonId]) || 1;
+  }
+
+  function getCityTradeCoinAmount(direction, resource, amount) {
+    const base = getCityMarketPrice(resource);
+    return direction === "buy"
+      ? Math.max(1, Math.ceil(amount * base * 1.35))
+      : Math.max(1, Math.round(amount * base));
+  }
+
+  function cityTradeDescription(trade) {
+    const resourceName = CITY_RESOURCE_LABELS[trade.resource] || trade.resource;
+    return trade.direction === "sell"
+      ? `${trade.amount} ${resourceName} for ${trade.coins} coins`
+      : `${trade.coins} coins for ${trade.amount} ${resourceName}`;
+  }
+
+  function dispatchCityTrade(direction, resource, amount = CITY_TRADE_AMOUNT) {
+    const quantity = Math.max(1, Math.floor(Number(amount) || 0));
+    if (!isCityMarketUnlocked()) {
+      showToast("Market locked", "Build a Village Market before arranging city trade.", "◇");
+      return false;
+    }
+    if (!["buy", "sell"].includes(direction) || !Object.prototype.hasOwnProperty.call(CITY_RESOURCE_LABELS, resource)) return false;
+    const coins = getCityTradeCoinAmount(direction, resource, quantity);
+    if (direction === "sell" && state.resources[resource] + 0.0001 < quantity) {
+      showToast("Not enough goods", `The caravan needs ${quantity} ${CITY_RESOURCE_LABELS[resource].toLowerCase()}.`, "!");
+      return false;
+    }
+    if (direction === "buy" && state.coins < coins) {
+      showToast("Not enough coins", `This delivery costs ${coins} coins.`, "!");
+      return false;
+    }
+    if (direction === "sell") storeResource(resource, -quantity);
+    else state.coins -= coins;
+    const trade = {
+      id: Math.max(1, Math.floor(Number(state.nextCityTradeId) || 1)),
+      direction,
+      resource,
+      amount: quantity,
+      coins,
+      sentAt: getWorldTime(),
+      dueAt: getWorldTime() + CITY_TRADE_DURATION_DAYS
+    };
+    state.nextCityTradeId = trade.id + 1;
+    state.cityTrades.push(trade);
+    addLog(`City trade sent: ${cityTradeDescription(trade)}. The caravan returns in ${CITY_TRADE_DURATION_DAYS} days.`);
+    showToast("Caravan dispatched", `${cityTradeDescription(trade)} · return in ${CITY_TRADE_DURATION_DAYS} in-game days.`, "◇");
+    saveGame();
+    return trade;
+  }
+
+  function processCityTrades() {
+    if (!Array.isArray(state.cityTrades) || !state.cityTrades.length) return;
+    const now = getWorldTime();
+    const completed = state.cityTrades.filter(trade => Number(trade.dueAt) <= now + 0.000001);
+    if (!completed.length) return;
+    state.cityTrades = state.cityTrades.filter(trade => Number(trade.dueAt) > now + 0.000001);
+    for (const trade of completed) {
+      if (trade.direction === "sell") {
+        state.coins += trade.coins;
+        addLog(`City payment arrived: ${trade.coins} coins for ${trade.amount} ${CITY_RESOURCE_LABELS[trade.resource].toLowerCase()}.`, true);
+        showToast("City payment received", `${trade.coins} coins were added to the treasury.`, "●");
+      } else {
+        const delivered = storeResource(trade.resource, trade.amount);
+        const lost = trade.amount - delivered;
+        const deliveryText = lost > 0.001
+          ? `${Math.floor(delivered)} ${CITY_RESOURCE_LABELS[trade.resource].toLowerCase()} stored; ${Math.ceil(lost)} could not fit.`
+          : `${trade.amount} ${CITY_RESOURCE_LABELS[trade.resource].toLowerCase()} stored.`;
+        addLog(`City delivery arrived: ${deliveryText}`, true);
+        showToast("City delivery arrived", deliveryText, "◇");
+      }
+    }
+    saveGame();
   }
 
   function clampResourcesToStorage(target = state) {
@@ -3999,6 +4112,7 @@
       state.day += 1;
       onNewDay();
     }
+    processCityTrades();
     updateWeatherSystem(deltaDays);
     updateDryRiverScenario();
     updateRandomEventSystem();
@@ -4956,6 +5070,90 @@
     renderAll();
   }
 
+  function getCityTradeRemaining(trade) {
+    return Math.max(0, Number(trade?.dueAt) - getWorldTime());
+  }
+
+  function openCityMarketPanel(building) {
+    if (!building || building.type !== "market" || !isCityMarketUnlocked()) return;
+    const season = getSeason();
+    const pendingTrades = Array.isArray(state.cityTrades) ? state.cityTrades.slice().sort((a, b) => a.dueAt - b.dueAt) : [];
+    const offers = Object.keys(CITY_RESOURCE_LABELS).map(resource => {
+      const price = getCityMarketPrice(resource, season.id);
+      const sellMax = Math.max(0, Math.floor(state.resources[resource] || 0));
+      const buyUnitCost = getCityTradeCoinAmount("buy", resource, 1);
+      const buyMax = Math.max(0, Math.floor((state.coins || 0) / (price * 1.35)));
+      const sellAmount = Math.min(CITY_TRADE_AMOUNT, sellMax);
+      const buyAmount = Math.min(CITY_TRADE_AMOUNT, buyMax);
+      const sellId = `cityTrade-sell-${resource}`;
+      const buyId = `cityTrade-buy-${resource}`;
+      return `<article class="market-offer">
+        <strong>${escapeHtml(CITY_RESOURCE_LABELS[resource])}</strong><span class="cost-chip">${price.toFixed(2)} coin/unit</span>
+        <small>This ${season.name.toLowerCase()} price is fixed when dispatched.</small>
+        <div class="market-trade-control">
+          <label for="${sellId}">Sell <output id="${sellId}-value">${sellAmount}</output> / ${sellMax}</label>
+          <input id="${sellId}" type="range" min="${sellMax ? 1 : 0}" max="${sellMax}" value="${sellAmount}" data-city-trade-slider="sell" data-resource="${resource}" ${sellMax ? "" : "disabled"}>
+          <small id="${sellId}-quote">Receive ${sellAmount ? getCityTradeCoinAmount("sell", resource, sellAmount) : 0} coins</small>
+          <button class="secondary-button" type="button" data-city-trade="sell" data-resource="${resource}" data-trade-slider-id="${sellId}" ${sellMax ? "" : "disabled"}>Send ${sellAmount || 0} to city</button>
+        </div>
+        <div class="market-trade-control">
+          <label for="${buyId}">Buy <output id="${buyId}-value">${buyAmount}</output> / ${buyMax}</label>
+          <input id="${buyId}" type="range" min="${buyMax ? 1 : 0}" max="${buyMax}" value="${buyAmount}" data-city-trade-slider="buy" data-resource="${resource}" ${buyMax ? "" : "disabled"}>
+          <small id="${buyId}-quote">Costs ${buyAmount ? getCityTradeCoinAmount("buy", resource, buyAmount) : 0} coins · ${buyUnitCost} per unit</small>
+          <button class="primary-button" type="button" data-city-trade="buy" data-resource="${resource}" data-trade-slider-id="${buyId}" ${buyMax ? "" : "disabled"}>Order ${buyAmount || 0}</button>
+        </div>
+      </article>`;
+    }).join("");
+    const queue = pendingTrades.length
+      ? pendingTrades.map(trade => `<div class="market-queue-item"><span><strong>${escapeHtml(cityTradeDescription(trade))}</strong><br><small>${trade.direction === "sell" ? "City payment" : "City delivery"} is on the road</small></span><strong>${escapeHtml(formatWeatherDuration(getCityTradeRemaining(trade)))}</strong></div>`).join("")
+      : `<div class="market-queue-item"><span><strong>No caravans travelling</strong><br><small>Dispatch goods or place an order below.</small></span><strong>Ready</strong></div>`;
+    dom.modalLayer.innerHTML = `
+      <div class="modal-backdrop">
+        <section class="sheet-modal modal-card" role="dialog" aria-modal="true" aria-labelledby="cityMarketTitle">
+          <div class="sheet-heading">
+            <div><span class="eyebrow">CITY EXCHANGE · ${escapeHtml(season.name.toUpperCase())} PRICES</span><h2 id="cityMarketTitle">Market caravan desk</h2></div>
+            <button class="sheet-close" type="button" aria-label="Close">×</button>
+          </div>
+          <div class="modal-icon" aria-hidden="true">◇</div>
+          <p class="modal-description">Send village goods to the nearby city for coins, or spend coins on supplies. Every caravan takes exactly ${CITY_TRADE_DURATION_DAYS} in-game days. Coins are stored indefinitely; delivered goods still need room in village storage.</p>
+          <div class="market-balance">Treasury <strong>● ${Math.floor(state.coins || 0).toLocaleString()}</strong> coins · no storage limit</div>
+          <h3>Seasonal city offers</h3>
+          <div class="market-offers">${offers}</div>
+          <h3>Caravans in transit</h3>
+          <div class="market-queue">${queue}</div>
+          <div class="inspection-actions">
+            <button id="backToMarketBuilding" class="secondary-button" type="button">Back to Market</button>
+          </div>
+        </section>
+      </div>`;
+    dom.modalLayer.querySelector(".sheet-close").addEventListener("click", () => closeModal(true));
+    dom.modalLayer.querySelector("#backToMarketBuilding").addEventListener("click", () => inspectBuilding(building.x, building.y));
+    const updateTradeControl = slider => {
+      const amount = Math.max(0, Math.floor(Number(slider.value) || 0));
+      const direction = slider.dataset.cityTradeSlider;
+      const resource = slider.dataset.resource;
+      const button = dom.modalLayer.querySelector(`[data-city-trade="${direction}"][data-resource="${resource}"]`);
+      const output = document.getElementById(`${slider.id}-value`);
+      const quote = document.getElementById(`${slider.id}-quote`);
+      const coins = getCityTradeCoinAmount(direction, resource, amount);
+      if (output) output.textContent = String(amount);
+      if (quote) quote.textContent = direction === "sell" ? `Receive ${coins} coins` : `Costs ${coins} coins · ${getCityTradeCoinAmount("buy", resource, 1)} per unit`;
+      if (button) button.textContent = direction === "sell" ? `Send ${amount} to city` : `Order ${amount}`;
+    };
+    dom.modalLayer.querySelectorAll("[data-city-trade-slider]").forEach(slider => {
+      slider.addEventListener("input", () => updateTradeControl(slider));
+    });
+    dom.modalLayer.querySelectorAll("[data-city-trade]").forEach(button => {
+      button.addEventListener("click", () => {
+        const slider = document.getElementById(button.dataset.tradeSliderId);
+        const trade = dispatchCityTrade(button.dataset.cityTrade, button.dataset.resource, slider?.value);
+        if (!trade) return;
+        renderAll();
+        openCityMarketPanel(building);
+      });
+    });
+  }
+
   function inspectBuilding(x, y) {
     const building = getBuildingAt(x, y);
     if (!building) {
@@ -5001,6 +5199,11 @@
     if (def.fullStaffProduction) {
       const multiplier = getBuildingProductionMultiplier(building, state, !isVillagerNight(), 1);
       contextRows.push(`<div class="inspection-row"><span>Staffing boost</span><strong>${assignedWorkers} / ${workerCapacity} · ${formatProductionMultiplier(multiplier)}× ${building.type === "farm" ? "food" : "water"} output · 3 workers = 2×</strong></div>`);
+    }
+    if (building.type === "market") {
+      const pendingTrades = Array.isArray(state.cityTrades) ? state.cityTrades.length : 0;
+      contextRows.push(`<div class="inspection-row"><span>City exchange</span><strong>Unlocked · ${Math.floor(state.coins || 0).toLocaleString()} coins stored indefinitely · ${pendingTrades} caravan${pendingTrades === 1 ? "" : "s"} travelling</strong></div>`);
+      inspectionControls.push(`<button id="openCityMarketButton" class="primary-button" type="button">Trade with the city</button>`);
     }
     if (building.type === "lumber") {
       const localTrees = getLoggingTreesInRange(building).length;
@@ -5173,6 +5376,8 @@
         renderAll();
       });
     }
+    const openCityMarketButton = dom.modalLayer.querySelector("#openCityMarketButton");
+    if (openCityMarketButton) openCityMarketButton.addEventListener("click", () => openCityMarketPanel(building));
   }
 
   function inspectVillager(person) {
@@ -5274,7 +5479,7 @@
       compost: "Strong soil recovery and lower pollution",
       granary: "5.5% less food consumption and waste",
       reservoir: "About 20 water/day in most weather",
-      market: "Production efficiency and happiness",
+      market: "Production efficiency, happiness and three-day city trade with indefinitely stored coins",
       windmill: "+20% output to every farm",
       school: "Up to 16 school places with a teacher, education, and 11% less ecological harm",
       playground: "Health and happiness for up to 10 children",
@@ -6014,6 +6219,17 @@
       card.dataset.capacity = String(capacity);
       card.title = `${value.toLocaleString()} ${resource === "wood" ? "timber" : resource} stored · ${capacity.toLocaleString()} capacity · trend is a 24-hour average`;
     }
+    const marketUnlocked = isCityMarketUnlocked();
+    const pendingTrades = Array.isArray(state.cityTrades) ? state.cityTrades.length : 0;
+    dom.coinsValue.textContent = Math.floor(state.coins || 0).toLocaleString();
+    dom.coinsTrend.textContent = marketUnlocked
+      ? pendingTrades ? `${pendingTrades} caravan${pendingTrades === 1 ? "" : "s"} away` : "City market open"
+      : "Market locked";
+    dom.coinsTrend.className = `trend ${marketUnlocked ? "positive" : ""}`;
+    const coinCard = document.querySelector('[data-resource="coins"]');
+    coinCard.title = marketUnlocked
+      ? `${Math.floor(state.coins || 0).toLocaleString()} coins · no storage limit · ${pendingTrades} city trade${pendingTrades === 1 ? "" : "s"} in transit`
+      : "Coins have no storage limit. Build a Village Market to begin city trade.";
     dom.ecosystemValue.textContent = `${Math.round(ecosystemScore())}%`;
     setTrend(dom.populationTrend, rates.population, "/day");
     setResourceTrend(dom.foodTrend, rates.food, "food");
@@ -6292,6 +6508,9 @@
   function updateWorldDataAttributes() {
     dom.gameCanvas.dataset.activeSaveSlot = String(activeSaveSlot);
     dom.gameCanvas.dataset.maxSaveSlots = String(MAX_SAVE_SLOTS);
+    dom.gameCanvas.dataset.cityMarketUnlocked = String(isCityMarketUnlocked());
+    dom.gameCanvas.dataset.coins = String(Math.floor(state.coins || 0));
+    dom.gameCanvas.dataset.cityTradesInTransit = String(Array.isArray(state.cityTrades) ? state.cityTrades.length : 0);
     const cropSites = state.buildings.filter(building => ["farm", "orchard"].includes(building.type));
     const farms = state.buildings.filter(building => building.type === "farm");
     const rainGardens = state.buildings.filter(building => building.type === "rain_garden");
@@ -8377,7 +8596,7 @@
   function cacheDom() {
     const ids = [
       "villageName", "seasonIcon", "dayLabel", "clockLabel", "weatherLabel", "pauseButton", "achievementsButton", "achievementCount", "menuButton",
-      "populationValue", "populationTrend", "foodValue", "foodTrend", "waterValue", "waterTrend", "woodValue", "woodTrend", "stoneValue", "stoneTrend", "ecosystemValue", "ecosystemTrend",
+      "populationValue", "populationTrend", "foodValue", "foodTrend", "waterValue", "waterTrend", "woodValue", "woodTrend", "stoneValue", "stoneTrend", "coinsValue", "coinsTrend", "ecosystemValue", "ecosystemTrend",
       "buildList", "buildSearch", "collapseBuildButton", "inspectTool", "demolishTool", "treePriorityTool", "selectionSwatch", "selectionLabel", "autosaveStatus", "mapFrame", "gameCanvas", "placementGuide", "placementGuideStep", "placementGuideTitle", "placementGuideText", "placementGuideWhy", "placementGuideSpot", "placementGuideAction", "placementGuideSkip", "descriptionToggle", "tileTooltip", "mapMessage",
       "zoomInButton", "zoomOutButton", "centerMapButton", "zoomLabel",
       "workersLabel", "familiesLabel", "footprintLabel", "footprintFill", "coordinatesLabel", "ecoBadge", "ecoRing", "ecoRingValue", "ecoSummary", "ecoMetrics",
