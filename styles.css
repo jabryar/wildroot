@@ -221,8 +221,9 @@ input:focus-visible {
   min-height: 68px;
   padding: 9px 18px;
   display: grid;
-  grid-template-columns: repeat(7, minmax(116px, 1fr));
+  grid-template-columns: repeat(7, minmax(250px, 1fr));
   gap: 8px;
+  overflow-x: auto;
   border-bottom: 1px solid var(--line);
   background: rgba(13, 40, 32, 0.82);
 }
@@ -230,9 +231,9 @@ input:focus-visible {
 .resource-card {
   min-width: 0;
   display: grid;
-  grid-template-columns: 31px 1fr auto;
+  grid-template-columns: 31px minmax(0, 1fr) max-content;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   padding: 5px 9px;
   border-right: 1px solid var(--line);
 }
@@ -276,14 +277,17 @@ input:focus-visible {
 
 .resource-copy strong {
   margin-top: 1px;
-  font-size: 14px;
+  font-size: clamp(12px, 0.7vw, 14px);
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .trend {
   color: var(--muted);
   font-size: 10px;
   white-space: nowrap;
+  padding-left: 4px;
+  font-variant-numeric: tabular-nums;
 }
 
 .trend.positive { color: var(--mint); }
@@ -2662,7 +2666,7 @@ kbd {
   .resource-strip {
     padding: 6px 8px;
     overflow-x: auto;
-    grid-template-columns: repeat(7, minmax(112px, 1fr));
+    grid-template-columns: repeat(7, minmax(210px, 1fr));
   }
 
   .workspace {
