@@ -7,6 +7,14 @@
   const MAX_ZOOM = 2.5;
   const WORLD_CENTER = WORLD_SIZE / 2;
   const DAY_LENGTH_MS = 180000;
+  const LOW_ZOOM_THRESHOLD = 0.65;
+  const LOW_ZOOM_SIMULATION_INTERVAL_MS = 50;
+  const LOW_ZOOM_RENDER_INTERVAL_MS = 1000 / 30;
+  const PAUSED_MAP_RENDER_INTERVAL_MS = 1000 / 10;
+  const PAUSED_LOW_ZOOM_RENDER_INTERVAL_MS = 1000 / 2;
+  const TERRAIN_CACHE_ZOOM_THRESHOLD = 1.15;
+  const NON_ESSENTIAL_UI_REFRESH_INTERVAL_MS = 900;
+  const MAP_INTERACTION_SETTLE_MS = 180;
   const SAVE_KEY = "wildroot-village-save-v1";
   const SAVE_SLOT_PREFIX = "wildroot-village-save-v1-slot-";
   const MAX_SAVE_SLOTS = 3;
@@ -1637,6 +1645,15 @@
   let modalResume = false;
   let modalClosable = false;
   let lastFrameTime = performance.now();
+  let pendingSimulationMs = 0;
+  let lastMapDrawTime = 0;
+  let mapInteractionUntil = 0;
+  let fpsEnabled = false;
+  let fpsSampleStartedAt = performance.now();
+  let fpsLoopFrames = 0;
+  let fpsMapFrames = 0;
+  let terrainCacheCanvas = null;
+  let terrainCacheKey = "";
   let lastUiTime = 0;
   let saveElapsed = 0;
   let mapMessageTimer = 0;
@@ -1672,6 +1689,40 @@
 
   function round1(value) {
     return Math.round(value * 10) / 10;
+  }
+
+  function resetFpsCounter(now = performance.now()) {
+    fpsSampleStartedAt = now;
+    fpsLoopFrames = 0;
+    fpsMapFrames = 0;
+  }
+
+  function toggleFpsOverlay() {
+    fpsEnabled = !fpsEnabled;
+    if (dom.fpsOverlay) {
+      dom.fpsOverlay.hidden = !fpsEnabled;
+      dom.fpsOverlay.textContent = fpsEnabled ? "FPS measuring…" : "";
+    }
+    resetFpsCounter();
+    return `FPS overlay ${fpsEnabled ? "enabled" : "disabled"}.`;
+  }
+
+  function keepMapResponsive() {
+    mapInteractionUntil = performance.now() + MAP_INTERACTION_SETTLE_MS;
+  }
+
+  function updateFpsOverlay(now, mapDrawn) {
+    if (!fpsEnabled) return;
+    fpsLoopFrames += 1;
+    if (mapDrawn) fpsMapFrames += 1;
+    const elapsed = now - fpsSampleStartedAt;
+    if (elapsed < 500 || !dom.fpsOverlay) return;
+    const loopFps = Math.round(fpsLoopFrames * 1000 / elapsed);
+    const mapFps = Math.round(fpsMapFrames * 1000 / elapsed);
+    dom.fpsOverlay.textContent = state?.paused
+      ? `PAUSED · redraw ${mapFps} · loop ${loopFps}`
+      : `FPS ${mapFps} · loop ${loopFps}`;
+    resetFpsCounter(now);
   }
 
   function normaliseWorkPriority(value) {
@@ -5055,6 +5106,7 @@
     selectedBuilding = type;
     activeTool = "build";
     updateSelectionUi();
+    keepMapResponsive();
   }
 
   function setTool(tool) {
@@ -5062,6 +5114,7 @@
     selectedRotation = 0;
     activeTool = tool;
     updateSelectionUi();
+    keepMapResponsive();
   }
 
   function rotateSelectedBuilding(direction) {
@@ -5073,6 +5126,7 @@
     const size = getBuildingSize(selectedBuilding, selectedRotation);
     updateSelectionUi();
     showMapMessage(`Rotated ${direction < 0 ? "left" : "right"} · ${size.w} × ${size.h}`);
+    keepMapResponsive();
   }
 
   function getPlacementOrigin(type, cursorX, cursorY, rotation = selectedRotation) {
@@ -6898,6 +6952,7 @@
     state.camera.y = before.y - (canvasY - dom.gameCanvas.height / 2) / scale;
     clampCamera();
     renderCameraUi();
+    keepMapResponsive();
   }
 
   function centreMap() {
@@ -6906,6 +6961,7 @@
     state.camera.zoom = 0.85;
     clampCamera();
     renderCameraUi();
+    keepMapResponsive();
   }
 
   function renderCameraUi() {
@@ -7052,6 +7108,7 @@
   function beginMapGesture(event) {
     if (event.button !== 0 || !gameActive || dom.modalLayer.children.length) return;
     clearTreePriorityTimer();
+    keepMapResponsive();
     const rect = dom.gameCanvas.getBoundingClientRect();
     const point = canvasTileFromEvent(event);
     mapGesture = {
@@ -7081,6 +7138,7 @@
   }
 
   function handleCanvasMove(event) {
+    keepMapResponsive();
     if (mapGesture && mapGesture.pointerId === event.pointerId) {
       const dx = event.clientX - mapGesture.startX;
       const dy = event.clientY - mapGesture.startY;
@@ -7298,7 +7356,8 @@
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     const bounds = getVisibleBounds(2);
 
-    drawTerrain(ctx, now, bounds);
+    drawTerrainLayer(ctx, now, bounds);
+    drawTreePrioritySelection(ctx);
     drawAmbientWildlife(ctx, now);
     for (const building of state.buildings) {
       if (building.x + building.w < bounds.minX || building.x > bounds.maxX || building.y + building.h < bounds.minY || building.y > bounds.maxY) continue;
@@ -7311,6 +7370,48 @@
     drawNight(ctx);
     drawNightLights(ctx, bounds);
     drawWeather(ctx, deltaMs);
+  }
+
+  function getTerrainCacheKey() {
+    const buildings = state.buildings.map(building => `${building.id}:${building.type}:${building.x}:${building.y}:${building.rotation || 0}`).join(",");
+    const priorityTrees = Object.keys(state.priorityTrees || {}).join(",");
+    const priorityStumps = Object.keys(state.priorityStumps || {}).join(",");
+    return [
+      dom.gameCanvas.width, dom.gameCanvas.height,
+      state.camera.x.toFixed(3), state.camera.y.toFixed(3), state.camera.zoom.toFixed(4),
+      getSeason().id, getWeather().id, state.weatherFrom, Math.round((state.weatherBlend || 0) * 20),
+      Math.round(state.ecosystem.soil * 4), Math.round(state.ecosystem.forest * 4),
+      state.scenarioId, state.dryRiverRefilled, state.dryRiverGushStartedAt,
+      Object.keys(state.loggedTrees || {}).length, Object.keys(state.clearedTiles || {}).length,
+      priorityTrees, priorityStumps, buildings
+    ].join("|");
+  }
+
+  function drawTerrainLayer(ctx, now, bounds) {
+    // At wide zoom the same detailed terrain covers the whole canvas for many
+    // frames. Cache that exact paint and redraw it only when the world, view or
+    // terrain appearance changes; buildings, people and weather still render live.
+    if (state.camera.zoom >= TERRAIN_CACHE_ZOOM_THRESHOLD) {
+      terrainCacheKey = "";
+      drawTerrain(ctx, now, bounds);
+      return;
+    }
+    const key = getTerrainCacheKey();
+    if (!terrainCacheCanvas || terrainCacheCanvas.width !== dom.gameCanvas.width || terrainCacheCanvas.height !== dom.gameCanvas.height) {
+      terrainCacheCanvas = document.createElement("canvas");
+      terrainCacheCanvas.width = dom.gameCanvas.width;
+      terrainCacheCanvas.height = dom.gameCanvas.height;
+      terrainCacheKey = "";
+    }
+    if (terrainCacheKey !== key) {
+      drawTerrain(ctx, now, bounds);
+      const cacheContext = terrainCacheCanvas.getContext("2d");
+      cacheContext.clearRect(0, 0, terrainCacheCanvas.width, terrainCacheCanvas.height);
+      cacheContext.drawImage(dom.gameCanvas, 0, 0);
+      terrainCacheKey = key;
+      return;
+    }
+    ctx.drawImage(terrainCacheCanvas, 0, 0);
   }
 
   function drawTutorialRecommendation(ctx, now) {
@@ -7427,8 +7528,6 @@
         if (clearing) drawClearingEdge(ctx, x, y, screen.x, screen.y, scale);
       }
     }
-
-    drawTreePrioritySelection(ctx);
 
     const centre = worldToCanvas(WORLD_CENTER, WORLD_CENTER);
     ctx.strokeStyle = "rgba(183,156,102,.12)";
@@ -8733,7 +8832,7 @@
     const ids = [
       "villageName", "seasonIcon", "dayLabel", "clockLabel", "weatherLabel", "pauseButton", "achievementsButton", "achievementCount", "menuButton",
       "populationValue", "populationTrend", "foodValue", "foodTrend", "waterValue", "waterTrend", "woodValue", "woodTrend", "stoneValue", "stoneTrend", "coinsValue", "coinsTrend", "ecosystemValue", "ecosystemTrend",
-      "buildList", "buildSearch", "collapseBuildButton", "inspectTool", "demolishTool", "treePriorityTool", "selectionSwatch", "selectionLabel", "autosaveStatus", "mapFrame", "gameCanvas", "placementGuide", "placementGuideStep", "placementGuideTitle", "placementGuideText", "placementGuideWhy", "placementGuideSpot", "placementGuideAction", "placementGuideSkip", "descriptionToggle", "tileTooltip", "mapMessage",
+      "buildList", "buildSearch", "collapseBuildButton", "inspectTool", "demolishTool", "treePriorityTool", "selectionSwatch", "selectionLabel", "autosaveStatus", "mapFrame", "gameCanvas", "fpsOverlay", "placementGuide", "placementGuideStep", "placementGuideTitle", "placementGuideText", "placementGuideWhy", "placementGuideSpot", "placementGuideAction", "placementGuideSkip", "descriptionToggle", "tileTooltip", "mapMessage",
       "zoomInButton", "zoomOutButton", "centerMapButton", "zoomLabel",
       "workersLabel", "familiesLabel", "footprintLabel", "footprintFill", "coordinatesLabel", "ecoBadge", "ecoRing", "ecoRingValue", "ecoSummary", "ecoMetrics",
       "learningProgress", "ecoCoachIcon", "ecoCoachMetric", "ecoCoachText", "ecoCoachPressure", "ecoCoachSupport", "ecoCoachConnection", "fieldGuideButton",
@@ -8827,19 +8926,45 @@
     const deltaMs = Math.min(250, now - lastFrameTime || 0);
     lastFrameTime = now;
     const simulationRunning = gameActive && !state.paused && !state.gameOver && !dom.modalLayer.children.length;
+    const lowZoom = state?.camera?.zoom < LOW_ZOOM_THRESHOLD;
     if (simulationRunning) {
       weatherVisualTime += deltaMs * state.speed;
-      const deltaDays = deltaMs * state.speed / DAY_LENGTH_MS;
-      updateSimulation(deltaDays);
-      updateVillagers(deltaMs);
-      saveElapsed += deltaMs;
-      if (saveElapsed >= 5000) {
-        saveElapsed = 0;
-        saveGame();
+      // At a wide view, the complete simulation was being recalculated on every
+      // display frame even though its results are not visible at that precision.
+      // Batch it at 20 Hz while retaining the exact elapsed game time.
+      pendingSimulationMs += deltaMs;
+      if (!lowZoom || pendingSimulationMs >= LOW_ZOOM_SIMULATION_INTERVAL_MS) {
+        const simulationDeltaMs = pendingSimulationMs;
+        pendingSimulationMs = 0;
+        const deltaDays = simulationDeltaMs * state.speed / DAY_LENGTH_MS;
+        updateSimulation(deltaDays);
+        updateVillagers(simulationDeltaMs);
+        saveElapsed += simulationDeltaMs;
+        if (saveElapsed >= 5000) {
+          saveElapsed = 0;
+          saveGame();
+        }
       }
+    } else {
+      pendingSimulationMs = 0;
     }
-    drawMap(now, deltaMs);
-    if (now - lastUiTime >= 300) {
+    // Preserve the existing terrain art. A wide active view presents the same
+    // canvas at 30 fps; a paused map has no animated simulation to repaint.
+    const mapIsBeingUsed = Boolean(mapGesture) || now < mapInteractionUntil;
+    const mapFrameInterval = mapIsBeingUsed ? 0 : simulationRunning
+      ? lowZoom ? LOW_ZOOM_RENDER_INTERVAL_MS : 0
+      : lowZoom ? PAUSED_LOW_ZOOM_RENDER_INTERVAL_MS : PAUSED_MAP_RENDER_INTERVAL_MS;
+    let mapDrawn = false;
+    if (!mapFrameInterval || now - lastMapDrawTime >= mapFrameInterval) {
+      lastMapDrawTime = now;
+      drawMap(now, deltaMs);
+      mapDrawn = true;
+    }
+    updateFpsOverlay(now, mapDrawn);
+    // Resources and side panels do not change while paused. During play, update
+    // their non-essential reports at one-third of the old frequency; actions
+    // still call renderAll directly for an immediate response.
+    if (simulationRunning && now - lastUiTime >= NON_ESSENTIAL_UI_REFRESH_INTERVAL_MS) {
       lastUiTime = now;
       if (state) renderAll();
     }
@@ -9445,6 +9570,10 @@
 
   function init() {
     cacheDom();
+    Object.defineProperty(window, "FPS", {
+      configurable: true,
+      get: toggleFpsOverlay
+    });
     loadAchievements();
     state = createNewState("Mossbank Clearing", "balanced");
     setupListeners();

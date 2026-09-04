@@ -764,6 +764,21 @@ kbd {
   touch-action: none;
 }
 
+.fps-overlay {
+  position: absolute;
+  z-index: 10;
+  top: 12px;
+  right: 12px;
+  padding: 5px 8px;
+  border: 1px solid rgba(191, 239, 166, .5);
+  border-radius: 5px;
+  background: rgba(5, 25, 18, .82);
+  color: #e3f5ca;
+  font: 600 12px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: .03em;
+  pointer-events: none;
+}
+
 .placement-guide {
   position: absolute;
   z-index: 8;
