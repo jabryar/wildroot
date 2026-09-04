@@ -5,6 +5,10 @@ const MAX_SNAPSHOT_BYTES = 850_000;
 const ONLINE_WINDOW_MS = 20_000;
 const VISITOR_ONLINE_WINDOW_MS = 15_000;
 const MAX_ACTIVE_VISITORS = 400;
+const DEFAULT_VISITOR_REFRESH_INTERVAL_MS = 5_000;
+const MIN_VISITOR_REFRESH_INTERVAL_MS = 500;
+const MAX_VISITOR_REFRESH_INTERVAL_MS = 10_000;
+const VISITOR_REFRESH_INTERVAL_STEP_MS = 500;
 
 function json(data, status = 200) {
   if (status === 204) {
@@ -46,6 +50,16 @@ function validSnapshot(snapshot) {
   return encoded.length > 2 && encoded.length <= MAX_SNAPSHOT_BYTES;
 }
 
+function normaliseVisitorRefreshInterval(value) {
+  const requested = Number(value);
+  const interval = Number.isFinite(requested) ? requested : DEFAULT_VISITOR_REFRESH_INTERVAL_MS;
+  const steps = Math.round((interval - MIN_VISITOR_REFRESH_INTERVAL_MS) / VISITOR_REFRESH_INTERVAL_STEP_MS);
+  return Math.max(
+    MIN_VISITOR_REFRESH_INTERVAL_MS,
+    Math.min(MAX_VISITOR_REFRESH_INTERVAL_MS, MIN_VISITOR_REFRESH_INTERVAL_MS + steps * VISITOR_REFRESH_INTERVAL_STEP_MS)
+  );
+}
+
 export class VillageSnapshot {
   constructor(state) {
     this.storage = state.storage;
@@ -59,7 +73,9 @@ export class VillageSnapshot {
     const active = {};
     let changed = false;
     for (const [visitorToken, rawLastSeen] of Object.entries(stored)) {
-      const lastSeen = Number(rawLastSeen);
+      const savedVisitor = rawLastSeen && typeof rawLastSeen === "object" && !Array.isArray(rawLastSeen) ? rawLastSeen : null;
+      const lastSeen = Number(savedVisitor?.lastSeen ?? rawLastSeen);
+      const refreshIntervalMs = normaliseVisitorRefreshInterval(savedVisitor?.refreshIntervalMs);
       const valid = VISITOR_TOKEN_PATTERN.test(visitorToken)
         && Number.isFinite(lastSeen)
         && lastSeen <= now + VISITOR_ONLINE_WINDOW_MS
@@ -69,7 +85,8 @@ export class VillageSnapshot {
         changed = true;
         continue;
       }
-      active[visitorToken] = lastSeen;
+      active[visitorToken] = { lastSeen, refreshIntervalMs };
+      if (!savedVisitor || Number(savedVisitor.lastSeen) !== lastSeen || Number(savedVisitor.refreshIntervalMs) !== refreshIntervalMs) changed = true;
     }
 
     if (changed) {
@@ -77,6 +94,14 @@ export class VillageSnapshot {
       else await this.storage.delete("visitors");
     }
     return active;
+  }
+
+  visitorSummary(visitors) {
+    const active = Object.values(visitors);
+    const publishIntervalMs = active.length
+      ? Math.min(...active.map(visitor => normaliseVisitorRefreshInterval(visitor.refreshIntervalMs)))
+      : DEFAULT_VISITOR_REFRESH_INTERVAL_MS;
+    return { visitors: active.length, publishIntervalMs };
   }
 
   async fetchVisitorPresence(request, record) {
@@ -89,9 +114,12 @@ export class VillageSnapshot {
       if (!visitors[visitorToken] && Object.keys(visitors).length >= MAX_ACTIVE_VISITORS) {
         return json({ error: "This village has reached its visitor limit." }, 429);
       }
-      visitors[visitorToken] = Date.now();
+      visitors[visitorToken] = {
+        lastSeen: Date.now(),
+        refreshIntervalMs: normaliseVisitorRefreshInterval(body?.refreshIntervalMs)
+      };
       await this.storage.put("visitors", visitors);
-      return json({ ok: true, visitors: Object.keys(visitors).length });
+      return json({ ok: true, ...this.visitorSummary(visitors) });
     }
 
     if (request.method === "DELETE") {
@@ -101,7 +129,7 @@ export class VillageSnapshot {
       delete visitors[visitorToken];
       if (Object.keys(visitors).length) await this.storage.put("visitors", visitors);
       else await this.storage.delete("visitors");
-      return json({ ok: true, visitors: Object.keys(visitors).length });
+      return json({ ok: true, ...this.visitorSummary(visitors) });
     }
 
     return json({ error: "Method not allowed." }, 405);
@@ -120,7 +148,7 @@ export class VillageSnapshot {
         village: record.snapshot,
         updatedAt: record.updatedAt,
         online: Date.now() - record.updatedAt <= ONLINE_WINDOW_MS,
-        visitors: Object.keys(visitors).length
+        ...this.visitorSummary(visitors)
       });
     }
 
@@ -147,7 +175,7 @@ export class VillageSnapshot {
     const updatedAt = Date.now();
     await this.storage.put("village", { ownerHash, snapshot: body.snapshot, updatedAt });
     const visitors = await this.getActiveVisitors();
-    return json({ ok: true, updatedAt, visitors: Object.keys(visitors).length });
+    return json({ ok: true, updatedAt, ...this.visitorSummary(visitors) });
   }
 }
 

@@ -120,12 +120,12 @@
         win.fetch = async (url, options = {}) => {
           const requestUrl = String(url);
           const method = options.method || "GET";
-          villageRequests.push({ url: requestUrl, method });
+          villageRequests.push({ url: requestUrl, method, body: options.body || "" });
           const payload = requestUrl.endsWith("/visitors")
-            ? { ok: true, visitors: 1 }
+            ? { ok: true, visitors: 1, publishIntervalMs: 500 }
             : method === "PUT"
-              ? { ok: true, updatedAt: Date.now(), visitors: 2 }
-              : { village: ownerSnapshot, online: true, updatedAt: Date.now(), visitors: 2 };
+              ? { ok: true, updatedAt: Date.now(), visitors: 2, publishIntervalMs: 500 }
+              : { village: ownerSnapshot, online: true, updatedAt: Date.now(), visitors: 2, publishIntervalMs: 500 };
           return new win.Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } });
         };
         doc.getElementById("shareVillageMenuButton").click();
@@ -133,6 +133,9 @@
         doc.getElementById("enableVillageShareButton").click();
         await wait(160);
         check("owner sees current visitor count", doc.getElementById("villageVisitorCount")?.textContent === "2 visitors now", doc.getElementById("villageVisitorCount")?.textContent || "missing");
+        const initialSharedUpdates = villageRequests.filter(request => request.method === "PUT").length;
+        await wait(650);
+        check("owner adapts shared map publication rate", villageRequests.filter(request => request.method === "PUT").length > initialSharedUpdates);
         doc.getElementById("shareVillageBackButton").click();
         await wait(80);
         doc.getElementById("visitVillageMenuButton").click();
@@ -153,6 +156,7 @@
         await wait(40);
         check("visit viewer applies the chosen update rate", doc.getElementById("visitVillageRefreshLabel")?.textContent === "0.5 seconds", doc.getElementById("visitVillageRefreshLabel")?.textContent || "missing");
         check("visitor presence sends a heartbeat", villageRequests.some(request => request.method === "POST" && request.url.endsWith("/visitors")));
+        check("visitor sends the chosen rate to the owner", villageRequests.some(request => request.method === "POST" && request.url.endsWith("/visitors") && JSON.parse(request.body).refreshIntervalMs === 500));
         doc.getElementById("visitVillageBackButton")?.click();
         await wait(80);
         check("visit viewer returns to menu", Boolean(doc.getElementById("resumeMenuButton")));
