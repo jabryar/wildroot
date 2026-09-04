@@ -379,7 +379,7 @@
       name: "Logging Camp",
       short: "▥",
       category: "industry",
-      description: "A full two-person crew fells an outside-zone tree in five base hours and works 10× faster inside the 15 × 15 zone. Stumps use the same speed. Healthy trees supply 5–10 timber; fire-damaged trees supply 30% less. Weather, education and illness can alter the exact time.",
+      description: "Fells marked trees anywhere, or unmarked trees inside its 15 × 15 zone. Outside-zone automatic chopping is optional. A full two-person crew takes five base hours outside the zone and works 10× faster inside it. Stumps use the same speed. Healthy trees supply 5–10 timber; fire-damaged trees supply 30% less.",
       cost: { wood: 12, stone: 6 },
       size: { w: 3, h: 2 },
       jobs: 2,
@@ -1616,8 +1616,8 @@
     },
     {
       title: "Distance changes the outcome",
-      body: "A full two-person Logging Camp crew takes five base hours to fell a tree outside its circular 15 × 15 zone and works 10× faster inside it, giving a 30-minute base time. When its local forest is exhausted, the camp travels to the nearest outside-zone tree. Stumps match the tree speed at their location. Weather, illness, education and staffing can change the exact duration.",
-      tip: "Long-hold a standing tree to toggle its gold priority marker; hold it again to return it to the normal queue. Mature Wood Farm plots are taken before unmarked wild trees. Keep occupied homes outside the purple five-tile noise buffer.",
+      body: "A full two-person Logging Camp crew takes five base hours to fell a marked tree outside its circular 15 × 15 zone and works 10× faster inside it, giving a 30-minute base time. It automatically chooses unmarked wild trees only inside that zone unless you turn on outside-zone search in the camp controls. Stumps match the tree speed at their location. Weather, illness, education and staffing can change the exact duration.",
+      tip: "Long-hold a standing tree to toggle its gold priority marker; marked trees can be reached outside the zone. Mature Wood Farm plots are taken before unmarked wild trees. Keep occupied homes outside the purple five-tile noise buffer.",
       art: "radial-gradient(circle at 30% 52%, transparent 0 20%, rgba(225,169,93,.48) 21% 23%, transparent 24%), radial-gradient(circle at 72% 48%, rgba(122,91,72,.52) 0 15%, transparent 16%), linear-gradient(90deg, #244f35 0 48%, #6f633d 49% 68%, #2a4b32 69%)"
     },
     {
@@ -1964,10 +1964,21 @@
     const normalRotation = normaliseRotation(rotation);
     const size = getBuildingSize(type, normalRotation);
     const building = { type, x: originX, y: originY, w: size.w, h: size.h, rotation: normalRotation, builtDay, id, staffingPriority: "normal" };
+    if (type === "lumber") building.autoOutsideRangeLogging = false;
     if (type === "wood_farm") building.woodFarmPlots = Array(WOOD_FARM_PLOTS).fill(getWorldTime(target));
     target.buildings.push(building);
     for (let dy = 0; dy < size.h; dy++) {
       for (let dx = 0; dx < size.w; dx++) target.occupancy[tileIndex(originX + dx, originY + dy)] = id;
+    }
+    if (type === "market") {
+      const history = normaliseMarketHistory(target);
+      const builtAt = Math.max(1, Number(builtDay) || getWorldTime(target));
+      history.firstBuiltAt = Number.isFinite(Number(history.firstBuiltAt))
+        ? Math.min(Number(history.firstBuiltAt), builtAt)
+        : builtAt;
+      // A replacement market begins observing seasons from this point, while
+      // keeping all seasons learned by earlier markets in the same village.
+      history.lastObservedAt = getWorldTime(target);
     }
     if (target === state) rosterDirty = true;
     return building;
@@ -2282,6 +2293,7 @@
       nextCityTradeId: 1,
       cityMarketEvent: null,
       nextCityMarketEventAt: null,
+      marketHistory: { firstBuiltAt: null, lastObservedAt: null, seasonsSeen: [] },
       ecosystem,
       terrainSeed: seed ^ 0x6d2b79f5,
       buildings: [],
@@ -2514,8 +2526,11 @@
       .filter(building => BUILDINGS[building.type] && Number.isFinite(building.x) && Number.isFinite(building.y))
       .map(building => {
         const rotation = normaliseRotation(building.rotation);
-        return normaliseWoodFarmPlots({ ...building, staffingPriority: normaliseWorkPriority(building.staffingPriority), rotation, ...getBuildingSize(building.type, rotation) }, merged);
+        const normalisedBuilding = normaliseWoodFarmPlots({ ...building, staffingPriority: normaliseWorkPriority(building.staffingPriority), rotation, ...getBuildingSize(building.type, rotation) }, merged);
+        if (normalisedBuilding.type === "lumber") normalisedBuilding.autoOutsideRangeLogging = building.autoOutsideRangeLogging === true;
+        return normalisedBuilding;
       });
+    normaliseMarketHistory(merged, loaded.marketHistory);
     merged.camera = { ...fallback.camera, ...(loaded.camera || {}) };
     merged.descriptionsEnabled = loaded.descriptionsEnabled !== false;
     merged.weather = WEATHERS[loaded.weather] ? loaded.weather : fallback.weather;
@@ -2691,6 +2706,64 @@
     return Boolean(target?.buildings?.some(building => building.type === "market"));
   }
 
+  function normaliseMarketHistory(target = state, savedHistory = target?.marketHistory) {
+    const markets = (target?.buildings || []).filter(building => building.type === "market");
+    const oldestExistingMarket = markets.length
+      ? Math.min(...markets.map(building => Math.max(1, Number(building.builtDay) || getWorldTime(target))))
+      : null;
+    const savedFirstBuiltAt = Number(savedHistory?.firstBuiltAt);
+    const firstBuiltAt = Number.isFinite(savedFirstBuiltAt)
+      ? savedFirstBuiltAt
+      : oldestExistingMarket;
+    const seasonsSeen = [...new Set((Array.isArray(savedHistory?.seasonsSeen) ? savedHistory.seasonsSeen : [])
+      .filter(seasonId => SEASONS.some(season => season.id === seasonId)))];
+    const savedLastObservedAt = Number(savedHistory?.lastObservedAt);
+    target.marketHistory = {
+      firstBuiltAt: Number.isFinite(firstBuiltAt) ? Math.max(1, firstBuiltAt) : null,
+      lastObservedAt: Number.isFinite(savedLastObservedAt) ? savedLastObservedAt : oldestExistingMarket,
+      seasonsSeen
+    };
+    return target.marketHistory;
+  }
+
+  function updateMarketHistory(target = state) {
+    const history = normaliseMarketHistory(target);
+    if (!isCityMarketUnlocked(target)) return history;
+    const now = getWorldTime(target);
+    if (!Number.isFinite(Number(history.firstBuiltAt))) history.firstBuiltAt = now;
+    const observedFrom = Number.isFinite(Number(history.lastObservedAt))
+      ? Math.max(history.firstBuiltAt, Number(history.lastObservedAt))
+      : history.firstBuiltAt;
+    const seasonsSeen = new Set(history.seasonsSeen);
+    for (let day = Math.max(1, Math.floor(observedFrom)); day <= Math.floor(now); day++) {
+      seasonsSeen.add(getSeason(day).id);
+    }
+    history.seasonsSeen = [...seasonsSeen];
+    history.lastObservedAt = now;
+    return history;
+  }
+
+  function getMarketPriceGuideStatus(target = state) {
+    const history = updateMarketHistory(target);
+    const daysOperating = Number.isFinite(Number(history.firstBuiltAt))
+      ? Math.max(0, getWorldTime(target) - Number(history.firstBuiltAt))
+      : 0;
+    return {
+      unlocked: history.seasonsSeen.length >= SEASONS.length || daysOperating >= 50,
+      seasonsSeen: history.seasonsSeen,
+      daysOperating
+    };
+  }
+
+  function seasonalMarketPriceGuideHtml() {
+    const headings = SEASONS.map(season => `<th scope="col">${escapeHtml(season.name)}</th>`).join("");
+    const rows = Object.keys(CITY_RESOURCE_LABELS).map(resource => {
+      const values = SEASONS.map(season => `<td>${Number(CITY_MARKET_PRICES[resource]?.[season.id] || 1).toFixed(2)}</td>`).join("");
+      return `<tr><th scope="row">${escapeHtml(CITY_RESOURCE_LABELS[resource])}</th>${values}</tr>`;
+    }).join("");
+    return `<div class="market-price-guide"><p><strong>Seasonal price ledger</strong><br><small>Normal city sell price in coins per unit. Buying costs 35% more; temporary specials can still change the live quote.</small></p><table><thead><tr><th scope="col">Resource</th>${headings}</tr></thead><tbody>${rows}</tbody></table></div>`;
+  }
+
   function getActiveCityMarketEvent(target = state) {
     const condition = target?.cityMarketEvent;
     if (!condition || Number(condition.until) <= getWorldTime(target)) return null;
@@ -2703,6 +2776,31 @@
     return seasonalPrice * (Number(marketEvent?.modifiers?.[resource]) || 1);
   }
 
+  function renderMarketValueIndicators(marketUnlocked) {
+    for (const resource of Object.keys(CITY_RESOURCE_LABELS)) {
+      const indicator = dom[`${resource}MarketValue`];
+      if (!indicator) continue;
+      if (!marketUnlocked) {
+        indicator.hidden = true;
+        continue;
+      }
+      const price = getCityMarketPrice(resource);
+      const difference = price - 1;
+      if (Math.abs(difference) < 0.001) {
+        indicator.hidden = true;
+        continue;
+      }
+      const isHigher = difference > 0;
+      const label = CITY_RESOURCE_LABELS[resource];
+      const direction = isHigher ? "more" : "less";
+      indicator.hidden = false;
+      indicator.textContent = isHigher ? "↑" : "↓";
+      indicator.className = `market-value ${isHigher ? "higher" : "lower"}`;
+      indicator.title = `${label} is worth ${price.toFixed(2)} coins per unit right now, ${direction} than its normal value.`;
+      indicator.setAttribute("aria-label", `${label} is worth ${direction} right now: ${price.toFixed(2)} coins per unit.`);
+    }
+  }
+
   function getCityTradeCoinAmount(direction, resource, amount) {
     const base = getCityMarketPrice(resource);
     return direction === "buy"
@@ -2710,11 +2808,20 @@
       : Math.max(1, Math.round(amount * base));
   }
 
+  function formatCityMarketPriceChanges(marketEvent) {
+    return Object.entries(marketEvent?.modifiers || {}).map(([resource, multiplier]) => {
+      const percentage = Math.round(Math.abs((Number(multiplier) - 1) * 100));
+      const direction = Number(multiplier) >= 1 ? "up" : "down";
+      return `${CITY_RESOURCE_LABELS[resource]} ${direction} ${percentage}%`;
+    }).join(" · ");
+  }
+
   function scheduleNextCityMarketEvent(fromTime = getWorldTime()) {
     state.nextCityMarketEventAt = fromTime + CITY_MARKET_EVENT_MIN_GAP_DAYS + rand() * (CITY_MARKET_EVENT_MAX_GAP_DAYS - CITY_MARKET_EVENT_MIN_GAP_DAYS);
   }
 
   function updateCityMarketConditions() {
+    updateMarketHistory();
     if (!isCityMarketUnlocked()) {
       state.cityMarketEvent = null;
       state.nextCityMarketEventAt = null;
@@ -2725,7 +2832,10 @@
     if (activeEvent) return;
     if (state.cityMarketEvent) {
       const expired = CITY_MARKET_EVENTS.find(event => event.id === state.cityMarketEvent.id);
-      if (expired) addLog(`City market normalised after ${expired.title.toLowerCase()}.`);
+      if (expired) {
+        addLog(`City market normalised after ${expired.title.toLowerCase()}.`, true);
+        showToast("Market prices normal", `${formatCityMarketPriceChanges(expired)} has returned to its seasonal price.`, "◇");
+      }
       state.cityMarketEvent = null;
     }
     if (!Number.isFinite(Number(state.nextCityMarketEventAt))) {
@@ -2737,9 +2847,9 @@
     const duration = marketEvent.duration[0] + rand() * (marketEvent.duration[1] - marketEvent.duration[0]);
     state.cityMarketEvent = { id: marketEvent.id, startedAt: now, until: now + duration };
     scheduleNextCityMarketEvent(now + duration);
-    const affectedResources = Object.keys(marketEvent.modifiers).map(resource => CITY_RESOURCE_LABELS[resource].toLowerCase()).join(" and ");
-    addLog(`City market special: ${marketEvent.title}. ${affectedResources} prices have changed for about ${formatWeatherDuration(duration).replace(" left", "")}.`, true);
-    showToast("City market special", `${marketEvent.title} · ${affectedResources} prices have changed.`, marketEvent.icon);
+    const priceChanges = formatCityMarketPriceChanges(marketEvent);
+    addLog(`City market special: ${marketEvent.title}. ${priceChanges} for about ${formatWeatherDuration(duration).replace(" left", "")}.`, true);
+    showToast("City market special", `${marketEvent.title} · ${priceChanges}.`, marketEvent.icon);
   }
 
   function cityTradeDescription(trade) {
@@ -3449,10 +3559,19 @@
       const index = Number(rawIndex);
       const x = index % WORLD_SIZE;
       const y = Math.floor(index / WORLD_SIZE);
-      if (!Number.isInteger(index) || !isStandingTree(x, y, target)) {
+      // Forest cover can temporarily hide a tree as the ecosystem score moves.
+      // Keep its priority through that visual change, and discard it only when
+      // the tile is permanently unavailable for a standing tree.
+      const permanentlyUnavailable = !Number.isInteger(index)
+        || !inWorld(x, y)
+        || Boolean(getWaterwayTypeForState(target, x, y))
+        || Boolean(isClearingForState(target, x, y))
+        || Boolean(target.loggedTrees?.[index]);
+      if (permanentlyUnavailable) {
         delete target.priorityTrees[rawIndex];
         continue;
       }
+      if (!isStandingTree(x, y, target)) continue;
       trees.push({ x, y, index, prioritizedAt: Number(prioritizedAt) || 0 });
     }
     return trees.sort((a, b) => a.prioritizedAt - b.prioritizedAt || a.index - b.index);
@@ -3629,7 +3748,9 @@
       priority,
       managed,
       localTree,
-      !priority && !managed && !localTree ? getNearestLoggingTreeOutsideRange(building, target) : null
+      building?.autoOutsideRangeLogging === true && !priority && !managed && !localTree
+        ? getNearestLoggingTreeOutsideRange(building, target)
+        : null
     );
   }
 
@@ -3688,7 +3809,7 @@
     if (priority) return priority.inRange ? Math.max(0.1, clamp(getLoggingTreesInRange(building, target).length / 18, 0, 1)) : 0.1;
     const wildTreeAccess = clamp(getLoggingTreesInRange(building, target).length / 18, 0, 1);
     if (getMatureWoodFarmSupply(building, target).length) return 1;
-    return wildTreeAccess || (getNearestLoggingTreeOutsideRange(building, target) ? 0.1 : 0);
+    return wildTreeAccess || (building.autoOutsideRangeLogging === true && getNearestLoggingTreeOutsideRange(building, target) ? 0.1 : 0);
   }
 
   function buildingGap(a, b) {
@@ -5351,6 +5472,7 @@
     if (!building || building.type !== "market" || !isCityMarketUnlocked()) return;
     const season = getSeason();
     const marketEvent = getActiveCityMarketEvent();
+    const priceGuideStatus = getMarketPriceGuideStatus();
     const pendingTrades = Array.isArray(state.cityTrades) ? state.cityTrades.slice().sort((a, b) => a.dueAt - b.dueAt) : [];
     const offers = Object.keys(CITY_RESOURCE_LABELS).map(resource => {
       const price = getCityMarketPrice(resource, season.id);
@@ -5388,6 +5510,9 @@
     const marketSpecial = marketEvent
       ? `<div class="market-balance"><strong>${escapeHtml(marketEvent.icon)} ${escapeHtml(marketEvent.title)}</strong> · ${escapeHtml(marketEvent.description)} <small>${escapeHtml(formatWeatherDuration(state.cityMarketEvent.until - getWorldTime()))}</small></div>`
       : `<div class="market-balance"><strong>◇ Market conditions normal</strong> · Seasonal prices are in effect.</div>`;
+    const priceGuide = priceGuideStatus.unlocked
+      ? seasonalMarketPriceGuideHtml()
+      : `<div class="market-price-guide market-price-guide-locked"><strong>Seasonal price ledger</strong><br><small>Observe ${SEASONS.length} seasons with a market (${priceGuideStatus.seasonsSeen.length}/${SEASONS.length}) or keep the village market history for 50 days (${Math.floor(priceGuideStatus.daysOperating)}/50) to unlock this guide. Demolishing and rebuilding a market does not reset progress.</small></div>`;
     dom.modalLayer.innerHTML = `
       <div class="modal-backdrop">
         <section class="sheet-modal modal-card" role="dialog" aria-modal="true" aria-labelledby="cityMarketTitle">
@@ -5399,6 +5524,7 @@
           <p class="modal-description">Send village goods to the nearby city for coins, or spend coins on supplies. Every caravan takes exactly ${CITY_TRADE_DURATION_DAYS} in-game days. Seasonal and temporary special prices are fixed when dispatched. Coins are stored indefinitely; delivered goods still need room in village storage.</p>
           <div class="market-balance">Treasury <strong>● ${Math.floor(state.coins || 0).toLocaleString()}</strong> coins · no storage limit</div>
           ${marketSpecial}
+          ${priceGuide}
           <h3>City offers</h3>
           <div class="market-offers">${offers}</div>
           <h3>Caravans in transit</h3>
@@ -5522,7 +5648,7 @@
           ? "Automatic local felling at 10× speed"
           : loggingTarget?.remote
             ? `Automatic outside-zone felling at the ${OUTSIDE_TREE_FELLING_HOURS}-hour full-crew pace`
-            : "STOPPED — no mature trees";
+            : "STOPPED — no local or marked trees";
       const regrowthText = !farmTrees && nextMaturity !== null ? ` · next ready in ${nextMaturity.toFixed(1)} days` : "";
       contextRows.push(`<div class="inspection-row"><span>Logging zone</span><strong>${localTrees} standing trees · ${localStumps} stump${localStumps === 1 ? "" : "s"} · ${timberStatus}</strong></div>`);
       contextRows.push(`<div class="inspection-row"><span>Priority work</span><strong>${priorityCount} marked tree${priorityCount === 1 ? "" : "s"} · ${priorityStumpCount} marked stump${priorityStumpCount === 1 ? "" : "s"} · ${remoteStumps} remote stump${remoteStumps === 1 ? "" : "s"}</strong></div>`);
@@ -5530,7 +5656,9 @@
       contextRows.push(`<div class="inspection-row"><span>Timber harvest</span><strong>${loggingTarget ? `${nextTimberYield} from next tree` : "No tree ready"} · ${OUTSIDE_TREE_FELLING_HOURS}-hour outside-zone base with ${STANDARD_LOGGING_CREW} workers · ${(OUTSIDE_TREE_FELLING_HOURS / IN_RANGE_LOGGING_MULTIPLIER * 60).toFixed(0)}-minute base inside · weather and worker conditions modify exact time · ${projectedTimberRate.toFixed(1)}/working day now</strong></div>`);
       contextRows.push(`<div class="inspection-row"><span>Stump crew</span><strong>${priorityTreeActive ? "Waiting for marked tree" : `${stumpWorkers} worker${stumpWorkers === 1 ? "" : "s"} assigned`} · each worker adds 0.5× standard crew speed · same five-hour / 10× location rule as chopping · marked stumps first · ${Math.round((Number(building.stumpProgress) || 0) * 100)}% toward next clearing tile</strong></div>`);
       contextRows.push(`<div class="inspection-row"><span>Full-storage rule</span><strong id="loggingStoragePolicy">${building.workWhenStorageFull === true ? `Manual override on · work continues${storageFull ? " and excess timber is discarded" : " if storage fills"}` : `Automatic pause on · ${storageBlocked ? "camp is waiting for enough room for its next load" : "camp will stop before wasting timber"}`}</strong></div>`);
+      contextRows.push(`<div class="inspection-row"><span>Outside-zone rule</span><strong id="loggingOutsidePolicy">${building.autoOutsideRangeLogging === true ? "Automatic search on · unmarked trees can be chopped outside the zone" : "Automatic search off · only marked trees are chopped outside the zone"}</strong></div>`);
       inspectionControls.push(`<button id="loggingStorageOverride" class="secondary-button" type="button" aria-pressed="${building.workWhenStorageFull === true}">${building.workWhenStorageFull === true ? "Restore automatic full-storage pause" : "Allow work when timber storage is full"}</button>`);
+      inspectionControls.push(`<button id="loggingOutsideRangeOverride" class="secondary-button" type="button" aria-pressed="${building.autoOutsideRangeLogging === true}">${building.autoOutsideRangeLogging === true ? "Stop automatic outside-zone chopping" : "Allow automatic outside-zone chopping"}</button>`);
     }
     if (building.type === "wood_farm") {
       const mature = getMatureWoodFarmPlots(building).length;
@@ -5660,6 +5788,23 @@
         renderAll();
       });
     }
+    const loggingOutsideRangeOverride = dom.modalLayer.querySelector("#loggingOutsideRangeOverride");
+    if (loggingOutsideRangeOverride) {
+      loggingOutsideRangeOverride.addEventListener("click", () => {
+        building.autoOutsideRangeLogging = building.autoOutsideRangeLogging !== true;
+        const automaticSearchEnabled = building.autoOutsideRangeLogging === true;
+        loggingOutsideRangeOverride.setAttribute("aria-pressed", String(automaticSearchEnabled));
+        loggingOutsideRangeOverride.textContent = automaticSearchEnabled ? "Stop automatic outside-zone chopping" : "Allow automatic outside-zone chopping";
+        const policy = dom.modalLayer.querySelector("#loggingOutsidePolicy");
+        if (policy) policy.textContent = automaticSearchEnabled
+          ? "Automatic search on · unmarked trees can be chopped outside the zone"
+          : "Automatic search off · only marked trees are chopped outside the zone";
+        addLog(`${def.name} ${automaticSearchEnabled ? "will now automatically search for unmarked trees outside its zone" : "will only chop marked trees outside its zone"}.`);
+        showToast(automaticSearchEnabled ? "Outside-zone search enabled" : "Outside-zone search disabled", automaticSearchEnabled ? "This camp may now seek unmarked trees beyond its zone." : "Only manually marked trees can be chopped beyond the zone.", automaticSearchEnabled ? "!" : "✓");
+        saveGame();
+        renderAll();
+      });
+    }
     const openCityMarketButton = dom.modalLayer.querySelector("#openCityMarketButton");
     if (openCityMarketButton) openCityMarketButton.addEventListener("click", () => openCityMarketPanel(building));
   }
@@ -5751,7 +5896,7 @@
       farm: "About 25 food/day with two farmers; up to 50/day with three before season, soil and nearby pollution",
       well: "About 29 water/day before weather and water quality",
       river_pump: "24 water/day from a neighbouring creek or river; −0.05 wildlife/day",
-      lumber: "A five-hour outside-zone base felling time with a full crew, 10× speed inside the zone, matching stump speed, 5–10 timber from healthy trees, 30% less from fire-damaged trees, and a full-storage pause unless manually overridden",
+      lumber: "Marked trees can be felled anywhere; unmarked trees are automatic only inside the zone unless that camp enables outside-zone search. A full crew takes five hours outside and works 10× faster inside, with a full-storage pause unless manually overridden",
       wood_farm: "16 managed tree plots; each supplies 5–10 timber and regrows in 5 days",
       hunter: "About 16 food/day before wildlife health",
       quarry: "About 31 stone/day",
@@ -6508,6 +6653,7 @@
       card.title = `${value.toLocaleString()} ${resource === "wood" ? "timber" : resource} stored · ${capacity.toLocaleString()} capacity · trend is a 24-hour average`;
     }
     const marketUnlocked = isCityMarketUnlocked();
+    renderMarketValueIndicators(marketUnlocked);
     const pendingTrades = Array.isArray(state.cityTrades) ? state.cityTrades.length : 0;
     dom.coinsValue.textContent = Math.floor(state.coins || 0).toLocaleString();
     dom.coinsTrend.textContent = marketUnlocked
@@ -6751,16 +6897,6 @@
     dom.familiesLabel.title = residentialNoise.exposedResidents
       ? `Residential noise: -${residentialNoise.moodLoss.toFixed(2)} morale/day and -${residentialNoise.healthLoss.toFixed(2)} health/day as a full 24-hour average`
       : `No occupied housing is exposed to active noise within ${NOISE_POLLUTION_RANGE} tiles`;
-    const industrialWeight = countBuilding("lumber") + countBuilding("quarry") * 1.3 + countBuilding("workshop") * 1.6 + countBuilding("hunter") * 0.8;
-    const builtArea = state.buildings.reduce((sum, building) => sum + building.w * building.h, 0);
-    const footprint = clamp(Math.max(0, builtArea - 9) * 0.7 + state.population * 0.34 + industrialWeight * 3, 0, 100);
-    let label = "Gentle";
-    if (footprint >= 25) label = "Growing";
-    if (footprint >= 50) label = "Heavy";
-    if (footprint >= 75) label = "Severe";
-    dom.footprintLabel.textContent = label;
-    dom.footprintFill.style.width = `${footprint}%`;
-    dom.footprintFill.style.background = footprint > 70 ? "linear-gradient(90deg,#d98754,#e56d65)" : footprint > 45 ? "linear-gradient(90deg,#7ebc71,#e4bd65)" : "";
   }
 
   function updateSelectionUi() {
@@ -6859,7 +6995,7 @@
     dom.gameCanvas.dataset.loggingTreesInRange = String(loggingCamps.reduce((sum, building) => sum + getLoggingTreesInRange(building).length, 0));
     dom.gameCanvas.dataset.loggingFarmSupply = String(loggingCamps.reduce((sum, building) => sum + getMatureWoodFarmSupply(building).length, 0));
     dom.gameCanvas.dataset.loggingManagedTargets = String(loggingCamps.filter(building => getLoggingTarget(building)?.kind === "farm").length);
-    dom.gameCanvas.dataset.loggingTargetOrder = "priority-stump,priority-tree,ordinary-stumps,mature-managed-tree,local-wild-tree,nearest-outside-zone-wild-tree";
+    dom.gameCanvas.dataset.loggingTargetOrder = "priority-stump,priority-tree,ordinary-stumps,mature-managed-tree,unmarked-wild-tree-inside-zone,optional-nearest-outside-zone-wild-tree";
     dom.gameCanvas.dataset.loggingStopped = String(loggingCamps.filter(building => getLoggingAccessFactor(building) <= 0 || isLoggingStorageBlocked(building)).length);
     dom.gameCanvas.dataset.stumpPriorityCamps = String(loggingCamps.filter(building => !isLoggingStorageBlocked(building) && getAssignedWorkers(building.id) > 0 && getLoggingWorkStumps(building).length > 0 && !getLoggingTarget(building)?.priority).length);
     dom.gameCanvas.dataset.priorityTreesOverrideStumps = String(loggingCamps.filter(building => !isLoggingStorageBlocked(building) && !getPriorityStumpForCamp(building) && getLoggingWorkStumps(building).some(stump => !stump.priority) && getLoggingTarget(building)?.priority).length);
@@ -6908,6 +7044,7 @@
     dom.gameCanvas.dataset.timberStorageFull = String(isTimberStorageFull());
     dom.gameCanvas.dataset.storageBlockedLoggingCamps = String(loggingCamps.filter(building => isLoggingStorageBlocked(building)).length);
     dom.gameCanvas.dataset.loggingFullStorageOverrides = String(loggingCamps.filter(building => building.workWhenStorageFull === true).length);
+    dom.gameCanvas.dataset.loggingOutsideRangeOverrides = String(loggingCamps.filter(building => building.autoOutsideRangeLogging === true).length);
     dom.gameCanvas.dataset.storageCapacityFood = String(getStorageCapacity("food"));
     dom.gameCanvas.dataset.storageCapacityWater = String(getStorageCapacity("water"));
     dom.gameCanvas.dataset.storageCapacityWood = String(getStorageCapacity("wood"));
@@ -8944,10 +9081,10 @@
   function cacheDom() {
     const ids = [
       "villageName", "seasonIcon", "dayLabel", "clockLabel", "weatherLabel", "pauseButton", "achievementsButton", "achievementCount", "menuButton",
-      "populationValue", "populationTrend", "foodValue", "foodTrend", "waterValue", "waterTrend", "woodValue", "woodTrend", "stoneValue", "stoneTrend", "coinsValue", "coinsTrend", "ecosystemValue", "ecosystemTrend",
+      "populationValue", "populationTrend", "foodValue", "foodTrend", "foodMarketValue", "waterValue", "waterTrend", "waterMarketValue", "woodValue", "woodTrend", "woodMarketValue", "stoneValue", "stoneTrend", "stoneMarketValue", "coinsValue", "coinsTrend", "ecosystemValue", "ecosystemTrend",
       "buildList", "buildSearch", "collapseBuildButton", "inspectTool", "demolishTool", "treePriorityTool", "selectionSwatch", "selectionLabel", "autosaveStatus", "mapFrame", "gameCanvas", "fpsOverlay", "placementGuide", "placementGuideStep", "placementGuideTitle", "placementGuideText", "placementGuideWhy", "placementGuideSpot", "placementGuideAction", "placementGuideSkip", "descriptionToggle", "tileTooltip", "mapMessage",
       "zoomInButton", "zoomOutButton", "centerMapButton", "zoomLabel",
-      "workersLabel", "familiesLabel", "footprintLabel", "footprintFill", "coordinatesLabel", "ecoBadge", "ecoRing", "ecoRingValue", "ecoSummary", "ecoMetrics",
+      "workersLabel", "familiesLabel", "coordinatesLabel", "ecoBadge", "ecoRing", "ecoRingValue", "ecoSummary", "ecoMetrics",
       "learningProgress", "ecoCoachIcon", "ecoCoachMetric", "ecoCoachText", "ecoCoachPressure", "ecoCoachSupport", "ecoCoachConnection", "fieldGuideButton",
       "objectiveProgress", "objectiveIntro", "objectiveList", "eventLog", "openChronicleButton", "modalLayer", "toastStack"
     ];
@@ -9651,6 +9788,9 @@
       assignPeopleJobs(speedState);
       for (const tree of getLoggingTreesInRange(camp, speedState)) speedState.loggedTrees[tileIndex(tree.x, tree.y)] = speedState.day;
       const automaticOutsideTree = getLoggingTarget(camp, speedState);
+      camp.autoOutsideRangeLogging = true;
+      const optedInOutsideTree = getLoggingTarget(camp, speedState);
+      camp.autoOutsideRangeLogging = false;
       const outsideTree = { kind: "wild", x: 0, y: 0, index: 0, inRange: false, priority: true };
       const insideTree = { kind: "wild", x: 40, y: 48, index: tileIndex(40, 48), inRange: true, priority: false };
       const outsideRate = getLoggingFellingRate(camp, outsideTree, speedState, true);
@@ -9663,7 +9803,8 @@
       const sixWorkerOutsideHours = outsideRate > 0 ? 24 / (outsideRate * (6 / STANDARD_LOGGING_CREW)) : Infinity;
       const checks = [
         ["A full two-person crew fells an outside-zone tree in five base hours", getAssignedWorkersForState(camp.id, speedState) === 2 && Math.abs(outsideHours - OUTSIDE_TREE_FELLING_HOURS) < 0.0001],
-        ["Unmarked trees outside the 10× zone are selected automatically", automaticOutsideTree?.kind === "wild" && automaticOutsideTree?.remote === true && automaticOutsideTree?.inRange === false && automaticOutsideTree?.priority === false],
+        ["Unmarked trees outside the 10× zone are not selected by default", automaticOutsideTree === null],
+        ["Outside-zone automatic chopping only selects an unmarked tree when that camp enables it", optedInOutsideTree?.kind === "wild" && optedInOutsideTree?.remote === true && optedInOutsideTree?.inRange === false && optedInOutsideTree?.priority === false],
         ["Four shared logging workers halve an outside priority job to 2.5 hours", Math.abs(fourWorkerOutsideHours - OUTSIDE_TREE_FELLING_HOURS / 2) < 0.0001],
         ["Six shared logging workers complete it at triple speed", Math.abs(sixWorkerOutsideHours - OUTSIDE_TREE_FELLING_HOURS / 3) < 0.0001],
         ["The 10× logging zone reduces the base time to thirty minutes", Math.abs(insideHours - OUTSIDE_TREE_FELLING_HOURS / IN_RANGE_LOGGING_MULTIPLIER) < 0.0001],
