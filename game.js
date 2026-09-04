@@ -26,6 +26,13 @@
   const SEASONAL_LEAF_FADE_DAYS = 3;
   const STAFFED_SHIFT_START_HOUR = 7;
   const STAFFED_SHIFT_STANDARD_END_HOUR = 18.5;
+  const FOOD_EATING_START_HOUR = 4;
+  const FOOD_EATING_END_HOUR = 20;
+  const FOOD_NEED_RANGES = {
+    child: [0.4, 0.6],
+    adult: [0.8, 1.3],
+    elder: [0.5, 0.7]
+  };
   const RESIDENT_LIFESPAN_MIN_DAYS = 40;
   const RESIDENT_LIFESPAN_MAX_DAYS = 60;
   const TRAVELLER_LIFESPAN_MIN_DAYS = 20;
@@ -84,6 +91,16 @@
     stone: { spring: 0.95, summer: 1, autumn: 1.05, winter: 1.1 }
   };
   const CITY_RESOURCE_LABELS = { food: "Food", water: "Water", wood: "Timber", stone: "Stone" };
+  const CITY_MARKET_EVENTS = [
+    { id: "harvest_glut", title: "Lowland harvest glut", description: "City granaries are overflowing after a bumper harvest.", icon: "♧", duration: [1.5, 3], modifiers: { food: 0.62 } },
+    { id: "grain_shortage", title: "Regional grain shortage", description: "Poor harvests have left city grain merchants competing for supplies.", icon: "!", duration: [1.5, 3], modifiers: { food: 1.65 } },
+    { id: "dry_season", title: "Dry-season water demand", description: "Nearby settlements are buying water reserves ahead of a dry spell.", icon: "≈", duration: [1, 2.5], modifiers: { water: 1.7 } },
+    { id: "building_boom", title: "City building boom", description: "A construction surge has increased demand for timber and stone.", icon: "⌂", duration: [2, 4], modifiers: { wood: 1.45, stone: 1.35 } },
+    { id: "quarry_overstock", title: "Quarry overstock sale", description: "Regional quarries have more stone than their yards can hold.", icon: "◆", duration: [1.5, 3], modifiers: { stone: 0.65 } },
+    { id: "timber_contract", title: "Timber contract", description: "A shipyard has placed a temporary premium order for seasoned timber.", icon: "▰", duration: [1, 2.5], modifiers: { wood: 1.7 } }
+  ];
+  const CITY_MARKET_EVENT_MIN_GAP_DAYS = 2;
+  const CITY_MARKET_EVENT_MAX_GAP_DAYS = 5;
 
   const WEATHERS = {
     mild: { id: "mild", name: "Mild skies", icon: "○", food: 1, waterOutput: 1, wood: 1, eco: {}, duration: { minDays: 1, maxDays: 2.5, typicalDays: 1.75 } },
@@ -924,7 +941,7 @@
       id: "day_night_cycles",
       icon: "◐",
       title: "Observe the day–night system",
-      principle: "A settlement has rhythms. Staffed work pauses while people sleep, but consumption, weather, natural processes and automatic infrastructure continue. Resource rates show the weighted average across the entire day.",
+      principle: "A settlement has rhythms. Staffed work pauses while people sleep, and people eat between 04:00 and 20:00; water use, weather, natural processes and automatic infrastructure continue. Resource rates show the weighted average across the entire day.",
       realWorld: "Electricity, transport and water systems also have daily demand cycles, so planners compare peak loads with full-day totals.",
       mission: "Reach nighttime with at least one staffed workplace and one automatic building in the village.",
       test: () => isVillagerNight()
@@ -2093,6 +2110,35 @@
     return (Number(target?.day) || 1) + (Number(target?.dayProgress) || 0);
   }
 
+  function isFoodEatingTime(target = state) {
+    const hour = getVillageHour(target);
+    return hour >= FOOD_EATING_START_HOUR && hour < FOOD_EATING_END_HOUR;
+  }
+
+  function getResidentDailyFoodNeed(person, target = state) {
+    const range = FOOD_NEED_RANGES[person?.ageGroup] || FOOD_NEED_RANGES.adult;
+    const identity = Number(person?.id) || 0;
+    return range[0] + (range[1] - range[0]) * seededNoise(identity, 211, Number(target?.terrainSeed) || 1);
+  }
+
+  function getDailyFoodNeed(target = state) {
+    return (target?.people || []).reduce((total, person) => total + getResidentDailyFoodNeed(person, target), 0);
+  }
+
+  function getFoodConservationFactor(staffedProductionActive = !isVillagerNight()) {
+    return Math.max(0.72, 1 - getOperationalBuildingUnits("granary", state, staffedProductionActive) * 0.055);
+  }
+
+  function getAverageDailyFoodConsumption() {
+    const staffedEatingHours = Math.max(0, Math.min(FOOD_EATING_END_HOUR, getStaffedShiftEndHour()) - Math.max(FOOD_EATING_START_HOUR, STAFFED_SHIFT_START_HOUR));
+    const eatingHours = FOOD_EATING_END_HOUR - FOOD_EATING_START_HOUR;
+    const unstaffedEatingHours = eatingHours - staffedEatingHours;
+    const difficulty = getDifficulty();
+    return getDailyFoodNeed() * difficulty.consumption * (
+      getFoodConservationFactor(true) * staffedEatingHours + getFoodConservationFactor(false) * unstaffedEatingHours
+    ) / eatingHours;
+  }
+
   function getYearDay(target = state) {
     const yearLength = SEASON_LENGTH * SEASONS.length;
     const worldDay = (Number(target?.day) || 1) - 1 + (Number(target?.dayProgress) || 0);
@@ -2234,6 +2280,8 @@
       coins: 0,
       cityTrades: [],
       nextCityTradeId: 1,
+      cityMarketEvent: null,
+      nextCityMarketEventAt: null,
       ecosystem,
       terrainSeed: seed ^ 0x6d2b79f5,
       buildings: [],
@@ -2431,6 +2479,13 @@
         sentAt: Number.isFinite(Number(trade.sentAt)) ? Number(trade.sentAt) : Number(trade.dueAt) - CITY_TRADE_DURATION_DAYS
       })) : [];
     merged.nextCityTradeId = Math.max(1, Math.floor(Number(loaded.nextCityTradeId) || 1), ...merged.cityTrades.map(trade => trade.id + 1));
+    const savedMarketEvent = loaded.cityMarketEvent;
+    merged.cityMarketEvent = CITY_MARKET_EVENTS.some(event => event.id === savedMarketEvent?.id) && Number(savedMarketEvent?.until) > getWorldTime(merged)
+      ? { id: savedMarketEvent.id, startedAt: Number(savedMarketEvent.startedAt) || getWorldTime(merged), until: Number(savedMarketEvent.until) }
+      : null;
+    merged.nextCityMarketEventAt = Number.isFinite(Number(loaded.nextCityMarketEventAt))
+      ? Number(loaded.nextCityMarketEventAt)
+      : null;
     merged.ecosystem = { ...fallback.ecosystem, ...(loaded.ecosystem || {}) };
     merged.stats = { ...fallback.stats, ...(loaded.stats || {}) };
     merged.buffs = { ...(loaded.buffs || {}) };
@@ -2636,8 +2691,16 @@
     return Boolean(target?.buildings?.some(building => building.type === "market"));
   }
 
-  function getCityMarketPrice(resource, seasonId = getSeason().id) {
-    return Number(CITY_MARKET_PRICES[resource]?.[seasonId]) || 1;
+  function getActiveCityMarketEvent(target = state) {
+    const condition = target?.cityMarketEvent;
+    if (!condition || Number(condition.until) <= getWorldTime(target)) return null;
+    return CITY_MARKET_EVENTS.find(event => event.id === condition.id) || null;
+  }
+
+  function getCityMarketPrice(resource, seasonId = getSeason().id, target = state) {
+    const seasonalPrice = Number(CITY_MARKET_PRICES[resource]?.[seasonId]) || 1;
+    const marketEvent = getActiveCityMarketEvent(target);
+    return seasonalPrice * (Number(marketEvent?.modifiers?.[resource]) || 1);
   }
 
   function getCityTradeCoinAmount(direction, resource, amount) {
@@ -2645,6 +2708,38 @@
     return direction === "buy"
       ? Math.max(1, Math.ceil(amount * base * 1.35))
       : Math.max(1, Math.round(amount * base));
+  }
+
+  function scheduleNextCityMarketEvent(fromTime = getWorldTime()) {
+    state.nextCityMarketEventAt = fromTime + CITY_MARKET_EVENT_MIN_GAP_DAYS + rand() * (CITY_MARKET_EVENT_MAX_GAP_DAYS - CITY_MARKET_EVENT_MIN_GAP_DAYS);
+  }
+
+  function updateCityMarketConditions() {
+    if (!isCityMarketUnlocked()) {
+      state.cityMarketEvent = null;
+      state.nextCityMarketEventAt = null;
+      return;
+    }
+    const now = getWorldTime();
+    const activeEvent = getActiveCityMarketEvent();
+    if (activeEvent) return;
+    if (state.cityMarketEvent) {
+      const expired = CITY_MARKET_EVENTS.find(event => event.id === state.cityMarketEvent.id);
+      if (expired) addLog(`City market normalised after ${expired.title.toLowerCase()}.`);
+      state.cityMarketEvent = null;
+    }
+    if (!Number.isFinite(Number(state.nextCityMarketEventAt))) {
+      scheduleNextCityMarketEvent(now);
+      return;
+    }
+    if (now + 0.000001 < state.nextCityMarketEventAt) return;
+    const marketEvent = CITY_MARKET_EVENTS[Math.floor(rand() * CITY_MARKET_EVENTS.length)];
+    const duration = marketEvent.duration[0] + rand() * (marketEvent.duration[1] - marketEvent.duration[0]);
+    state.cityMarketEvent = { id: marketEvent.id, startedAt: now, until: now + duration };
+    scheduleNextCityMarketEvent(now + duration);
+    const affectedResources = Object.keys(marketEvent.modifiers).map(resource => CITY_RESOURCE_LABELS[resource].toLowerCase()).join(" and ");
+    addLog(`City market special: ${marketEvent.title}. ${affectedResources} prices have changed for about ${formatWeatherDuration(duration).replace(" left", "")}.`, true);
+    showToast("City market special", `${marketEvent.title} · ${affectedResources} prices have changed.`, marketEvent.icon);
   }
 
   function cityTradeDescription(trade) {
@@ -3980,7 +4075,7 @@
     }
   }
 
-  function getProductionRates(staffedProductionActive = !isVillagerNight(), includeDiscreteLoggingForecast = true) {
+  function getProductionRates(staffedProductionActive = !isVillagerNight(), includeDiscreteLoggingForecast = true, includeFoodConsumption = isFoodEatingTime()) {
     syncPeopleRoster();
     const season = getSeason();
     const weather = getWeather();
@@ -3995,7 +4090,7 @@
     const clinicProtection = Math.min(0.65, getOperationalBuildingUnits("clinic", state, staffedProductionActive) * 0.2);
     const illnessActive = Number(state.buffs.illnessUntil) > getWorldTime();
     const illnessWorkFactor = illnessActive ? 0.72 + clinicProtection * 0.35 : 1;
-    const granaryFactor = Math.max(0.72, 1 - getOperationalBuildingUnits("granary", state, staffedProductionActive) * 0.055);
+    const granaryFactor = getFoodConservationFactor(staffedProductionActive);
     const soilFactor = 0.38 + state.ecosystem.soil * 0.007;
     const forestFactor = 0.28 + state.ecosystem.forest * 0.008;
     const wildlifeFactor = 0.24 + state.ecosystem.wildlife * 0.0085;
@@ -4005,7 +4100,11 @@
     const winterFuel = season.id === "winter" ? state.population * 0.22 : state.population * 0.045;
 
     const rates = {
-      food: -state.population * 1.18 * difficulty.consumption * granaryFactor,
+      // Each resident has a stable daily ration based on life stage. Rations are
+      // consumed from 04:00 until 20:00, rather than continuously overnight.
+      food: includeFoodConsumption
+        ? -getDailyFoodNeed() * difficulty.consumption * granaryFactor * 24 / (FOOD_EATING_END_HOUR - FOOD_EATING_START_HOUR)
+        : 0,
       water: -state.population * 1.34 * difficulty.consumption * season.waterUse * (weather.waterUse || 1) * rationing,
       wood: -winterFuel * difficulty.consumption,
       stone: 0,
@@ -4124,14 +4223,18 @@
   }
 
   function getDailyAverageProductionRates() {
-    const dayRates = getProductionRates(true);
-    const nightRates = getProductionRates(false);
+    // Food is scheduled around meals rather than around the work shift, so add
+    // its true 24-hour average after combining staffed and night production.
+    const dayRates = getProductionRates(true, true, false);
+    const nightRates = getProductionRates(false, true, false);
     const dayFraction = getStaffedShiftDayFraction();
     const nightFraction = 1 - dayFraction;
-    return Object.fromEntries(Object.keys(dayRates).map(key => [
+    const rates = Object.fromEntries(Object.keys(dayRates).map(key => [
       key,
       dayRates[key] * dayFraction + nightRates[key] * nightFraction
     ]));
+    rates.food -= getAverageDailyFoodConsumption();
+    return rates;
   }
 
   function getEcoRateReport(staffedProductionActive = !isVillagerNight()) {
@@ -4277,6 +4380,7 @@
       state.day += 1;
       onNewDay();
     }
+    updateCityMarketConditions();
     processCityTrades();
     updateWeatherSystem(deltaDays);
     updateDryRiverScenario();
@@ -5246,19 +5350,24 @@
   function openCityMarketPanel(building) {
     if (!building || building.type !== "market" || !isCityMarketUnlocked()) return;
     const season = getSeason();
+    const marketEvent = getActiveCityMarketEvent();
     const pendingTrades = Array.isArray(state.cityTrades) ? state.cityTrades.slice().sort((a, b) => a.dueAt - b.dueAt) : [];
     const offers = Object.keys(CITY_RESOURCE_LABELS).map(resource => {
       const price = getCityMarketPrice(resource, season.id);
       const sellMax = Math.max(0, Math.floor(state.resources[resource] || 0));
       const buyUnitCost = getCityTradeCoinAmount("buy", resource, 1);
-      const buyMax = Math.max(0, Math.floor((state.coins || 0) / (price * 1.35)));
+      const buyMax = Math.max(0, Math.floor((state.coins || 0) / buyUnitCost));
       const sellAmount = Math.min(CITY_TRADE_AMOUNT, sellMax);
       const buyAmount = Math.min(CITY_TRADE_AMOUNT, buyMax);
       const sellId = `cityTrade-sell-${resource}`;
       const buyId = `cityTrade-buy-${resource}`;
+      const specialPrice = Number(marketEvent?.modifiers?.[resource]);
+      const priceDetail = specialPrice
+        ? `${marketEvent.title}: ${specialPrice > 1 ? "higher" : "lower"} than the normal ${season.name.toLowerCase()} price.`
+        : `Seasonal ${season.name.toLowerCase()} price.`;
       return `<article class="market-offer">
         <strong>${escapeHtml(CITY_RESOURCE_LABELS[resource])}</strong><span class="cost-chip">${price.toFixed(2)} coin/unit</span>
-        <small>This ${season.name.toLowerCase()} price is fixed when dispatched.</small>
+        <small>${escapeHtml(priceDetail)} Price is fixed when dispatched.</small>
         <div class="market-trade-control">
           <label for="${sellId}">Sell <output id="${sellId}-value">${sellAmount}</output> / ${sellMax}</label>
           <input id="${sellId}" type="range" min="${sellMax ? 1 : 0}" max="${sellMax}" value="${sellAmount}" data-city-trade-slider="sell" data-resource="${resource}" ${sellMax ? "" : "disabled"}>
@@ -5276,6 +5385,9 @@
     const queue = pendingTrades.length
       ? pendingTrades.map(trade => `<div class="market-queue-item"><span><strong>${escapeHtml(cityTradeDescription(trade))}</strong><br><small>${trade.direction === "sell" ? "City payment" : "City delivery"} is on the road</small></span><strong>${escapeHtml(formatWeatherDuration(getCityTradeRemaining(trade)))}</strong></div>`).join("")
       : `<div class="market-queue-item"><span><strong>No caravans travelling</strong><br><small>Dispatch goods or place an order below.</small></span><strong>Ready</strong></div>`;
+    const marketSpecial = marketEvent
+      ? `<div class="market-balance"><strong>${escapeHtml(marketEvent.icon)} ${escapeHtml(marketEvent.title)}</strong> · ${escapeHtml(marketEvent.description)} <small>${escapeHtml(formatWeatherDuration(state.cityMarketEvent.until - getWorldTime()))}</small></div>`
+      : `<div class="market-balance"><strong>◇ Market conditions normal</strong> · Seasonal prices are in effect.</div>`;
     dom.modalLayer.innerHTML = `
       <div class="modal-backdrop">
         <section class="sheet-modal modal-card" role="dialog" aria-modal="true" aria-labelledby="cityMarketTitle">
@@ -5284,9 +5396,10 @@
             <button class="sheet-close" type="button" aria-label="Close">×</button>
           </div>
           <div class="modal-icon" aria-hidden="true">◇</div>
-          <p class="modal-description">Send village goods to the nearby city for coins, or spend coins on supplies. Every caravan takes exactly ${CITY_TRADE_DURATION_DAYS} in-game days. Coins are stored indefinitely; delivered goods still need room in village storage.</p>
+          <p class="modal-description">Send village goods to the nearby city for coins, or spend coins on supplies. Every caravan takes exactly ${CITY_TRADE_DURATION_DAYS} in-game days. Seasonal and temporary special prices are fixed when dispatched. Coins are stored indefinitely; delivered goods still need room in village storage.</p>
           <div class="market-balance">Treasury <strong>● ${Math.floor(state.coins || 0).toLocaleString()}</strong> coins · no storage limit</div>
-          <h3>Seasonal city offers</h3>
+          ${marketSpecial}
+          <h3>City offers</h3>
           <div class="market-offers">${offers}</div>
           <h3>Caravans in transit</h3>
           <div class="market-queue">${queue}</div>
