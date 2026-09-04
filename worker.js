@@ -1,7 +1,7 @@
 const CODE_PATTERN = /^[A-Z0-9]{6}$/;
 const TOKEN_PATTERN = /^[a-f0-9]{48,128}$/i;
 const MAX_SNAPSHOT_BYTES = 850_000;
-const ONLINE_WINDOW_MS = 90_000;
+const ONLINE_WINDOW_MS = 20_000;
 
 function json(data, status = 200) {
   if (status === 204) {

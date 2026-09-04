@@ -21,8 +21,8 @@
   const ACHIEVEMENT_KEY = "wildroot-village-achievements-v1";
   const SAVE_VERSION = 2;
   const VILLAGE_VISIT_CODE_LENGTH = 6;
-  const VILLAGE_SHARE_PUBLISH_INTERVAL_MS = 60_000;
-  const VILLAGE_ONLINE_WINDOW_MS = 90_000;
+  const VILLAGE_SHARE_PUBLISH_INTERVAL_MS = 5_000;
+  const VILLAGE_VISIT_REFRESH_INTERVAL_MS = 5_000;
   const SEASON_LENGTH = 12;
   const WEATHER_FADE_DAYS = 0.12;
   const EVERGREEN_TREE_SHARE = 0.1;
@@ -1702,6 +1702,7 @@
   let standingWildTreeCountCache = null;
   let sharePublishInFlight = false;
   let lastSharePublishAttemptAt = 0;
+  let activeVillageVisit = null;
 
   const dom = {};
 
@@ -2610,18 +2611,84 @@
     return normaliseVillageShare(target);
   }
 
+  function sharedTileMap(source, valueForEntry) {
+    const result = {};
+    if (!source || typeof source !== "object" || Array.isArray(source)) return result;
+    let entries = 0;
+    for (const [rawIndex, rawValue] of Object.entries(source)) {
+      if (entries >= WORLD_SIZE * WORLD_SIZE) break;
+      const index = Number(rawIndex);
+      if (!Number.isInteger(index) || index < 0 || index >= WORLD_SIZE * WORLD_SIZE) continue;
+      const value = valueForEntry(rawValue);
+      if (value === undefined) continue;
+      result[index] = value;
+      entries += 1;
+    }
+    return result;
+  }
+
+  function sharedVillageBuilding(building, index) {
+    const type = String(building?.type || "");
+    if (!BUILDINGS[type]) return null;
+    const rotation = normaliseRotation(building.rotation);
+    const size = getBuildingSize(type, rotation);
+    const x = clamp(Math.floor(Number(building.x) || 0), 0, WORLD_SIZE - size.w);
+    const y = clamp(Math.floor(Number(building.y) || 0), 0, WORLD_SIZE - size.h);
+    const shared = {
+      id: Math.max(1, Math.floor(Number(building.id) || index + 1)),
+      type,
+      x,
+      y,
+      w: size.w,
+      h: size.h,
+      rotation,
+      builtDay: Math.max(1, Number(building.builtDay) || 1)
+    };
+    if (type === "wood_farm" && Array.isArray(building.woodFarmPlots)) {
+      shared.woodFarmPlots = building.woodFarmPlots.slice(0, WOOD_FARM_PLOTS).map(value => Math.max(1, Number(value) || shared.builtDay));
+    }
+    return shared;
+  }
+
+  function getSharedVillageMapSnapshot() {
+    const ecosystem = Object.fromEntries(Object.keys(ECO_LABELS).map(metric => [metric, clamp(Math.round(Number(state.ecosystem?.[metric]) || 0), 0, 100)]));
+    const residents = villagers
+      .filter(person => !person.indoors)
+      .slice(0, 120)
+      .map(person => ({
+        x: clamp(Number(person.tileX) + (Number(person.nextX) - Number(person.tileX)) * clamp(Number(person.progress) || 0, 0, 1), 0, WORLD_SIZE - 0.01),
+        y: clamp(Number(person.tileY) + (Number(person.nextY) - Number(person.tileY)) * clamp(Number(person.progress) || 0, 0, 1), 0, WORLD_SIZE - 0.01),
+        age: ["child", "adult", "elder"].includes(person.age) ? person.age : "adult",
+        colour: Math.max(0, Math.floor(Number(person.colour) || 0)) % 4
+      }));
+    return {
+      terrainSeed: Math.floor(Number(state.terrainSeed) || 1),
+      day: Math.max(1, Math.floor(Number(state.day) || 1)),
+      dayProgress: clamp(Number(state.dayProgress) || 0, 0, 0.999999),
+      weather: WEATHERS[state.weather] ? state.weather : "mild",
+      weatherFrom: WEATHERS[state.weatherFrom] ? state.weatherFrom : (WEATHERS[state.weather] ? state.weather : "mild"),
+      weatherBlend: clamp(Number(state.weatherBlend) || 1, 0, 1),
+      ecosystem,
+      buildings: state.buildings.slice(0, 500).map(sharedVillageBuilding).filter(Boolean),
+      residents,
+      loggedTrees: sharedTileMap(state.loggedTrees, value => Math.max(1, Number(value) || 1)),
+      priorityTrees: sharedTileMap(state.priorityTrees, value => Math.max(1, Number(value) || 1)),
+      priorityStumps: sharedTileMap(state.priorityStumps, value => Math.max(1, Number(value) || 1)),
+      clearedTiles: sharedTileMap(state.clearedTiles, value => value ? true : undefined),
+      waterways: sharedTileMap(state.waterways, value => value === "river" || value === "creek" ? value : undefined),
+      scenarioId: SCENARIOS.some(scenario => scenario.id === state.scenarioId) ? state.scenarioId : null,
+      dryRiverRefilled: state.dryRiverRefilled === true,
+      dryRiverGushStartedAt: Number.isFinite(Number(state.dryRiverGushStartedAt)) ? Number(state.dryRiverGushStartedAt) : null,
+      burnedTrees: sharedTileMap(state.burnedTrees, value => value ? true : undefined)
+    };
+  }
+
   function getSharedVillageSnapshot() {
     const share = getVillageShare();
     const season = getSeason();
-    let mapImage = "";
-    try {
-      mapImage = dom.gameCanvas?.toDataURL("image/jpeg", 0.68) || "";
-      if (mapImage.length > 700_000) mapImage = "";
-    } catch {
-      mapImage = "";
-    }
+    const map = getSharedVillageMapSnapshot();
     return {
-      version: 1,
+      version: 2,
       code: share.code,
       villageName: String(state.villageName || "Wildroot Village").slice(0, 40),
       day: Math.max(1, Math.floor(Number(state.day) || 1)),
@@ -2631,12 +2698,8 @@
       coins: Math.max(0, Math.floor(Number(state.coins) || 0)),
       resources: Object.fromEntries(["food", "water", "wood", "stone"].map(resource => [resource, Math.max(0, Math.floor(Number(state.resources?.[resource]) || 0))])),
       ecosystem: Object.fromEntries(Object.keys(ECO_LABELS).map(metric => [metric, clamp(Math.round(Number(state.ecosystem?.[metric]) || 0), 0, 100)])),
-      buildingCount: state.buildings.length,
-      buildings: state.buildings.slice(0, 500).map(building => ({
-        type: String(building.type || ""), x: Math.round(Number(building.x) || 0), y: Math.round(Number(building.y) || 0),
-        w: Math.max(1, Math.round(Number(building.w) || 1)), h: Math.max(1, Math.round(Number(building.h) || 1))
-      })),
-      mapImage
+      buildingCount: map.buildings.length,
+      map
     };
   }
 
@@ -6120,6 +6183,7 @@
   }
 
   function closeModal(resume = true) {
+    clearActiveVillageVisit();
     dom.modalLayer.innerHTML = "";
     if (resume && modalResume && state && !state.gameOver) state.paused = false;
     modalResume = false;
@@ -6128,6 +6192,7 @@
   }
 
   function showStartScreen() {
+    clearActiveVillageVisit();
     if (gameActive) saveGame();
     gameActive = false;
     selectedBuilding = null;
@@ -6384,7 +6449,7 @@
         <section class="sheet-modal modal-card" role="dialog" aria-modal="true" aria-labelledby="menuTitle">
           <div class="sheet-heading"><div><span class="eyebrow">PAUSED · ${escapeHtml(getDifficulty().name.toUpperCase())} DIFFICULTY</span><h2 id="menuTitle">${escapeHtml(state.villageName)}</h2></div><button class="sheet-close" type="button" aria-label="Resume">×</button></div>
           <p class="modal-description">Day ${state.day} · ${Math.floor(state.population)} people · ${eco}% ecosystem · ${state.stats.eventsFaced} events faced</p>
-          <div class="menu-actions">
+          <div class="menu-actions menu-actions--primary">
             <button id="resumeMenuButton" class="primary-button" type="button">Resume village</button>
             <button id="saveMenuButton" class="secondary-button" type="button">Save now</button>
             <button id="exportMenuButton" class="secondary-button" type="button">Export save</button>
@@ -6394,12 +6459,14 @@
             <button id="shareVillageMenuButton" class="secondary-button" type="button">Share village</button>
             <button id="visitVillageMenuButton" class="secondary-button" type="button">Visit a village</button>
             <button id="feedbackMenuButton" class="secondary-button" type="button">Send feedback ↗</button>
+          </div>
+          <div class="menu-actions menu-actions--explore">
             ${state.placementTutorialCompleted ? "" : '<button id="tutorialMenuButton" class="secondary-button" type="button">Building tutorial</button>'}
             <button id="blogMenuButton" class="secondary-button" type="button">Village blog</button>
             <button id="fieldGuideMenuButton" class="secondary-button" type="button">Environmental field guide</button>
             <button id="achievementMenuButton" class="secondary-button" type="button">Achievements</button>
-            <button id="newMenuButton" class="secondary-button danger-button" type="button">Start a new village</button>
           </div>
+          <button id="newMenuButton" class="secondary-button danger-button menu-danger-action" type="button">Start a new village</button>
         </section>
       </div>`;
     const resume = () => closeModal(true);
@@ -6453,9 +6520,9 @@
       <div class="modal-backdrop">
         <section class="sheet-modal modal-card village-visit-panel" role="dialog" aria-modal="true" aria-labelledby="shareVillageTitle">
           <div class="sheet-heading"><div><span class="eyebrow">VIEW-ONLY VILLAGE VISITS</span><h2 id="shareVillageTitle">Share ${escapeHtml(state.villageName)}</h2></div><button class="sheet-close" type="button" aria-label="Back to menu">×</button></div>
-          <p class="modal-description">Visitors can view a fresh picture and summary of this village with its code. They cannot run time, trade, build, log, or alter anything.</p>
+          <p class="modal-description">Visitors can pan around a fresh read-only map and summary of this village with its code. They cannot run time, trade, build, log, or alter anything.</p>
           ${isSharing
-            ? `<div class="market-balance"><strong>Your village visit code</strong><br><output class="village-share-code">${escapeHtml(share.code)}</output><small>This village shows as online while this game remains open. Its last snapshot remains view-only when you leave.</small></div>`
+            ? `<div class="market-balance"><strong>Your village visit code</strong><br><output class="village-share-code">${escapeHtml(share.code)}</output><small>This map updates for visitors every few seconds while this game remains open. When you leave, it stays paused at your last shared time.</small></div>`
             : `<div class="market-balance"><strong>Sharing is off</strong><br><small>Turn it on to create a six-character code for this village. Your private owner token stays in this local save and is never shown to visitors.</small></div>`}
           <div class="menu-actions">
             ${isSharing ? '<button id="copyVillageCodeButton" class="primary-button" type="button">Copy visit code</button><button id="refreshVillageShareButton" class="secondary-button" type="button">Refresh shared village</button><button id="stopVillageShareButton" class="secondary-button danger-button" type="button">Stop sharing</button>' : '<button id="enableVillageShareButton" class="primary-button" type="button">Create village visit code</button>'}
@@ -6492,7 +6559,7 @@
       <div class="modal-backdrop">
         <section class="sheet-modal modal-card" role="dialog" aria-modal="true" aria-labelledby="visitVillageTitle">
           <div class="sheet-heading"><div><span class="eyebrow">VIEW-ONLY VILLAGE VISITS</span><h2 id="visitVillageTitle">Visit a village</h2></div><button class="sheet-close" type="button" aria-label="Go back">×</button></div>
-          <p class="modal-description">Enter the owner’s six-character code. A visited village is a snapshot only: it does not simulate, use resources, or accept changes.</p>
+          <p class="modal-description">Enter the owner’s six-character code. You can pan and zoom their read-only map, but it only updates from the owner and never simulates on your device.</p>
           <div class="visit-code-row"><label class="sr-only" for="visitVillageCodeModal">Village visit code</label><input id="visitVillageCodeModal" class="text-input visit-code-input" maxlength="6" placeholder="ABC123" autocomplete="off" autocapitalize="characters" spellcheck="false"><button id="openVillageVisitButton" class="primary-button" type="button">View village</button></div>
         </section>
       </div>`;
@@ -6508,53 +6575,326 @@
     dom.modalLayer.querySelector(".sheet-close").addEventListener("click", back);
   }
 
-  function sharedVillageFallbackMap(buildings) {
-    const tiles = (Array.isArray(buildings) ? buildings : []).slice(0, 500).map(building => {
-      const x = clamp(Number(building?.x) || 0, 0, WORLD_SIZE - 1);
-      const y = clamp(Number(building?.y) || 0, 0, WORLD_SIZE - 1);
-      const w = clamp(Number(building?.w) || 1, 1, WORLD_SIZE - x);
-      const h = clamp(Number(building?.h) || 1, 1, WORLD_SIZE - y);
-      const title = escapeHtml(BUILDINGS[building?.type]?.name || "Village building");
-      return `<i class="village-preview-building" title="${title}" style="left:${x}%;top:${y}%;width:${w}%;height:${h}%"></i>`;
-    }).join("");
-    return `<div class="village-preview-map" role="img" aria-label="Shared village map with ${Array.isArray(buildings) ? buildings.length : 0} buildings">${tiles}</div>`;
+  function readSharedVillageMap(village) {
+    const suppliedMap = village?.map && typeof village.map === "object" && !Array.isArray(village.map) ? village.map : null;
+    const source = suppliedMap || village || {};
+    const mapDay = Math.max(1, Math.floor(Number(source.day ?? village?.day) || 1));
+    const sourceEcosystem = source.ecosystem && typeof source.ecosystem === "object" ? source.ecosystem : village?.ecosystem || {};
+    const buildings = (Array.isArray(source.buildings) ? source.buildings : []).slice(0, 500)
+      .map(sharedVillageBuilding)
+      .filter(Boolean)
+      .map((building, index) => ({ ...building, id: index + 1 }));
+    const residents = (Array.isArray(source.residents) ? source.residents : []).slice(0, 120).map(resident => {
+      const x = Number(resident?.x);
+      const y = Number(resident?.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+      return {
+        x: clamp(x, 0, WORLD_SIZE - 0.01),
+        y: clamp(y, 0, WORLD_SIZE - 0.01),
+        age: ["child", "adult", "elder"].includes(resident.age) ? resident.age : "adult",
+        colour: Math.max(0, Math.floor(Number(resident.colour) || 0)) % 4
+      };
+    }).filter(Boolean);
+    const hasWaterways = Boolean(suppliedMap && source.waterways && typeof source.waterways === "object" && !Array.isArray(source.waterways));
+    return {
+      detailed: Boolean(suppliedMap),
+      terrainSeed: Math.floor(Number(source.terrainSeed) || 1),
+      day: mapDay,
+      dayProgress: clamp(Number(source.dayProgress ?? village?.dayProgress) || 0, 0, 0.999999),
+      weather: WEATHERS[source.weather] ? source.weather : "mild",
+      weatherFrom: WEATHERS[source.weatherFrom] ? source.weatherFrom : (WEATHERS[source.weather] ? source.weather : "mild"),
+      weatherBlend: clamp(Number(source.weatherBlend) || 1, 0, 1),
+      ecosystem: Object.fromEntries(Object.keys(ECO_LABELS).map(metric => [metric, clamp(Number(sourceEcosystem[metric]) || 0, 0, 100)])),
+      buildings,
+      residents,
+      loggedTrees: sharedTileMap(source.loggedTrees, value => value ? 1 : undefined),
+      priorityTrees: sharedTileMap(source.priorityTrees, value => value ? 1 : undefined),
+      priorityStumps: sharedTileMap(source.priorityStumps, value => value ? 1 : undefined),
+      clearedTiles: sharedTileMap(source.clearedTiles, value => value ? true : undefined),
+      waterways: sharedTileMap(source.waterways, value => value === "river" || value === "creek" ? value : undefined),
+      hasWaterways,
+      scenarioId: SCENARIOS.some(scenario => scenario.id === source.scenarioId) ? source.scenarioId : null,
+      dryRiverRefilled: source.dryRiverRefilled === true,
+      dryRiverGushStartedAt: Number.isFinite(Number(source.dryRiverGushStartedAt)) ? Number(source.dryRiverGushStartedAt) : null,
+      burnedTrees: sharedTileMap(source.burnedTrees, value => value ? true : undefined)
+    };
   }
 
-  function isSharedVillageImage(value) {
-    return typeof value === "string" && value.length <= 700_000 && /^data:image\/(?:jpeg|png);base64,[a-z0-9+/=]+$/i.test(value);
+  function makeSharedVillageRenderState(map, camera) {
+    const remoteState = {
+      terrainSeed: map.terrainSeed,
+      day: map.day,
+      dayProgress: map.dayProgress,
+      weather: map.weather,
+      weatherFrom: map.weatherFrom,
+      weatherBlend: map.weatherBlend,
+      ecosystem: { ...map.ecosystem },
+      buildings: map.buildings.map(building => ({
+        ...building,
+        woodFarmPlots: Array.isArray(building.woodFarmPlots) ? [...building.woodFarmPlots] : undefined
+      })),
+      people: [],
+      resources: { food: 0, water: 0, wood: 0, stone: 0 },
+      loggedTrees: map.loggedTrees,
+      priorityTrees: map.priorityTrees,
+      priorityStumps: map.priorityStumps,
+      clearedTiles: map.clearedTiles,
+      waterways: { ...map.waterways },
+      waterwaysInitialised: map.hasWaterways,
+      scenarioId: map.scenarioId,
+      dryRiverRefilled: map.dryRiverRefilled,
+      dryRiverGushStartedAt: map.dryRiverGushStartedAt,
+      burnedTrees: map.burnedTrees,
+      burnedTreeMapInitialised: true,
+      camera: { ...camera },
+      occupancy: Array(WORLD_SIZE * WORLD_SIZE).fill(0)
+    };
+    rebuildOccupancy(remoteState);
+    if (!remoteState.waterwaysInitialised) initialiseWaterways(remoteState);
+    return remoteState;
+  }
+
+  function drawSharedVillageResidents(ctx, residents) {
+    const scale = getTileScale();
+    if (scale < 7) return;
+    const outfits = ["#8f5847", "#486f68", "#8a754c", "#685a7b"];
+    for (const resident of residents) {
+      const point = worldToCanvas(resident.x, resident.y);
+      if (point.x < -12 || point.y < -12 || point.x > dom.gameCanvas.width + 12 || point.y > dom.gameCanvas.height + 12) continue;
+      const size = clamp(scale * (resident.age === "child" ? 0.09 : resident.age === "elder" ? 0.105 : 0.12), 1.3, 3.4);
+      ctx.fillStyle = outfits[resident.colour] || outfits[0];
+      ctx.fillRect(point.x - size * 0.48, point.y - size * 0.15, size * 0.96, size * 1.3);
+      ctx.fillStyle = resident.age === "elder" ? "#d1bfa3" : "#d7b187";
+      ctx.beginPath();
+      ctx.arc(point.x, point.y - size * 0.78, size * 0.62, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  function drawSharedVillageMap(visit) {
+    if (activeVillageVisit !== visit || !visit.canvas || !visit.map) return;
+    const previousState = state;
+    const previousCanvas = dom.gameCanvas;
+    const remoteState = makeSharedVillageRenderState(visit.map, visit.camera);
+    state = remoteState;
+    dom.gameCanvas = visit.canvas;
+    try {
+      const ctx = visit.canvas.getContext("2d");
+      ctx.clearRect(0, 0, visit.canvas.width, visit.canvas.height);
+      ctx.fillStyle = "#071b13";
+      ctx.fillRect(0, 0, visit.canvas.width, visit.canvas.height);
+      const bounds = getVisibleBounds(1);
+      drawTerrain(ctx, performance.now(), bounds);
+      drawAmbientWildlife(ctx, performance.now());
+      for (const building of state.buildings) {
+        if (building.x + building.w < bounds.minX || building.x > bounds.maxX || building.y + building.h < bounds.minY || building.y > bounds.maxY) continue;
+        drawBuilding(ctx, building, performance.now());
+      }
+      drawSharedVillageResidents(ctx, visit.map.residents);
+      drawNight(ctx);
+      drawNightLights(ctx, bounds);
+    } finally {
+      state = previousState;
+      dom.gameCanvas = previousCanvas;
+    }
+  }
+
+  function clampSharedVillageCamera(visit) {
+    const scale = BASE_TILE_SIZE * visit.camera.zoom;
+    const halfX = Math.min(WORLD_SIZE / 2, visit.canvas.width / (2 * scale));
+    const halfY = Math.min(WORLD_SIZE / 2, visit.canvas.height / (2 * scale));
+    visit.camera.x = clamp(visit.camera.x, halfX, WORLD_SIZE - halfX);
+    visit.camera.y = clamp(visit.camera.y, halfY, WORLD_SIZE - halfY);
+  }
+
+  function queueSharedVillageDraw(visit) {
+    if (activeVillageVisit !== visit || visit.drawFrame) return;
+    visit.drawFrame = window.requestAnimationFrame(() => {
+      visit.drawFrame = 0;
+      drawSharedVillageMap(visit);
+    });
+  }
+
+  function sharedVillageCanvasPoint(canvas, event) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (event.clientX - rect.left) * canvas.width / Math.max(1, rect.width),
+      y: (event.clientY - rect.top) * canvas.height / Math.max(1, rect.height)
+    };
+  }
+
+  function setSharedVillageZoom(visit, nextZoom, canvasX = visit.canvas.width / 2, canvasY = visit.canvas.height / 2) {
+    const previousScale = BASE_TILE_SIZE * visit.camera.zoom;
+    const worldX = visit.camera.x + (canvasX - visit.canvas.width / 2) / previousScale;
+    const worldY = visit.camera.y + (canvasY - visit.canvas.height / 2) / previousScale;
+    visit.camera.zoom = clamp(nextZoom, MIN_ZOOM, MAX_ZOOM);
+    const scale = BASE_TILE_SIZE * visit.camera.zoom;
+    visit.camera.x = worldX - (canvasX - visit.canvas.width / 2) / scale;
+    visit.camera.y = worldY - (canvasY - visit.canvas.height / 2) / scale;
+    clampSharedVillageCamera(visit);
+    visit.refs.zoom.textContent = `${Math.round(visit.camera.zoom * 100)}%`;
+    queueSharedVillageDraw(visit);
+  }
+
+  function updateSharedVillageVisit(visit, connectionIssue = "") {
+    if (activeVillageVisit !== visit) return;
+    const village = visit.village;
+    const map = visit.map;
+    const season = getSeason(map.day);
+    const hour = ((0.25 + map.dayProgress) % 1) * 24;
+    const ecosystem = Object.values(map.ecosystem).reduce((total, value, _, values) => total + value / Math.max(1, values.length), 0);
+    visit.refs.eyebrow.textContent = visit.online ? "LIVE OWNER VIEW" : "PAUSED OWNER SNAPSHOT";
+    visit.refs.status.textContent = connectionIssue
+      || (visit.online
+        ? "The owner is playing. This map refreshes from their village every few seconds."
+        : "The owner is offline. This village is paused at its last shared time.");
+    visit.refs.live.textContent = visit.online ? "LIVE · SYNCHRONIZING" : "PAUSED · OWNER OFFLINE";
+    visit.refs.live.classList.toggle("offline", !visit.online);
+    visit.refs.day.textContent = `Day ${map.day} · ${formatVillageTime(hour)} · ${season.icon} ${season.name}`;
+    visit.refs.people.textContent = Math.max(0, Math.floor(Number(village.population) || 0)).toLocaleString();
+    visit.refs.ecosystem.textContent = `${Math.round(ecosystem)}%`;
+    visit.refs.coins.textContent = Math.max(0, Math.floor(Number(village.coins) || 0)).toLocaleString();
+    visit.refs.foodWater.textContent = `${Math.floor(Number(village.resources?.food) || 0).toLocaleString()} / ${Math.floor(Number(village.resources?.water) || 0).toLocaleString()}`;
+    visit.refs.woodStone.textContent = `${Math.floor(Number(village.resources?.wood) || 0).toLocaleString()} / ${Math.floor(Number(village.resources?.stone) || 0).toLocaleString()}`;
+    visit.refs.zoom.textContent = `${Math.round(visit.camera.zoom * 100)}%`;
+  }
+
+  function attachSharedVillageMapControls(visit) {
+    const canvas = visit.canvas;
+    canvas.addEventListener("pointerdown", event => {
+      const point = sharedVillageCanvasPoint(canvas, event);
+      visit.drag = { pointerId: event.pointerId, x: point.x, y: point.y };
+      canvas.setPointerCapture?.(event.pointerId);
+    });
+    canvas.addEventListener("pointermove", event => {
+      if (!visit.drag || visit.drag.pointerId !== event.pointerId) return;
+      const point = sharedVillageCanvasPoint(canvas, event);
+      const scale = BASE_TILE_SIZE * visit.camera.zoom;
+      visit.camera.x -= (point.x - visit.drag.x) / scale;
+      visit.camera.y -= (point.y - visit.drag.y) / scale;
+      visit.drag.x = point.x;
+      visit.drag.y = point.y;
+      clampSharedVillageCamera(visit);
+      queueSharedVillageDraw(visit);
+    });
+    const finishPan = event => {
+      if (visit.drag?.pointerId === event.pointerId) visit.drag = null;
+    };
+    canvas.addEventListener("pointerup", finishPan);
+    canvas.addEventListener("pointercancel", finishPan);
+    canvas.addEventListener("wheel", event => {
+      event.preventDefault();
+      const point = sharedVillageCanvasPoint(canvas, event);
+      setSharedVillageZoom(visit, visit.camera.zoom * (event.deltaY < 0 ? 1.16 : 1 / 1.16), point.x, point.y);
+    }, { passive: false });
+    visit.refs.zoomIn.addEventListener("click", () => setSharedVillageZoom(visit, visit.camera.zoom * 1.2));
+    visit.refs.zoomOut.addEventListener("click", () => setSharedVillageZoom(visit, visit.camera.zoom / 1.2));
+    visit.refs.centre.addEventListener("click", () => {
+      visit.camera = { x: WORLD_CENTER, y: WORLD_CENTER, zoom: 0.85 };
+      clampSharedVillageCamera(visit);
+      updateSharedVillageVisit(visit);
+      queueSharedVillageDraw(visit);
+    });
+  }
+
+  function clearActiveVillageVisit() {
+    const visit = activeVillageVisit;
+    if (!visit) return;
+    if (visit.refreshTimer) window.clearInterval(visit.refreshTimer);
+    if (visit.drawFrame) window.cancelAnimationFrame(visit.drawFrame);
+    visit.closed = true;
+    activeVillageVisit = null;
+  }
+
+  async function refreshSharedVillageVisit(visit) {
+    if (activeVillageVisit !== visit || visit.fetching || visit.closed) return;
+    visit.fetching = true;
+    try {
+      const payload = await villageApiRequest(`/api/villages/${encodeURIComponent(visit.code)}`);
+      if (!payload.village || typeof payload.village !== "object") throw new Error("That village snapshot could not be read.");
+      visit.village = payload.village;
+      visit.map = readSharedVillageMap(payload.village);
+      visit.online = payload.online === true;
+      visit.updatedAt = Number(payload.updatedAt) || Date.now();
+      updateSharedVillageVisit(visit);
+      queueSharedVillageDraw(visit);
+    } catch (error) {
+      if (activeVillageVisit === visit) updateSharedVillageVisit(visit, "Connection unavailable · holding the last shared map until it can refresh.");
+    } finally {
+      visit.fetching = false;
+    }
   }
 
   async function showVillageVisit(code, returnToMenu = false) {
-    const back = () => returnToMenu ? openMenu(true) : showStartScreen();
-    dom.modalLayer.innerHTML = `<div class="modal-backdrop"><section class="sheet-modal modal-card" role="dialog" aria-modal="true" aria-labelledby="visitLoadingTitle"><div class="sheet-heading"><div><span class="eyebrow">VIEW-ONLY VILLAGE VISITS</span><h2 id="visitLoadingTitle">Opening ${escapeHtml(code)}</h2></div></div><p class="modal-description">Finding the latest shared village…</p></section></div>`;
+    clearActiveVillageVisit();
+    const back = () => {
+      clearActiveVillageVisit();
+      returnToMenu ? openMenu(true) : showStartScreen();
+    };
+    dom.modalLayer.innerHTML = `<div class="modal-backdrop"><section class="sheet-modal modal-card" role="dialog" aria-modal="true" aria-labelledby="visitLoadingTitle"><div class="sheet-heading"><div><span class="eyebrow">VIEW-ONLY VILLAGE VISITS</span><h2 id="visitLoadingTitle">Opening ${escapeHtml(code)}</h2></div></div><p class="modal-description">Finding the owner’s latest village map…</p></section></div>`;
     try {
       const payload = await villageApiRequest(`/api/villages/${encodeURIComponent(code)}`);
       const village = payload.village;
       if (!village || typeof village !== "object") throw new Error("That village snapshot could not be read.");
-      const eco = Object.values(village.ecosystem || {}).reduce((total, value, _, values) => total + Number(value || 0) / Math.max(1, values.length), 0);
-      const status = payload.online ? "Owner is playing now · live snapshot" : "Owner is offline · last shared snapshot";
-      const preview = isSharedVillageImage(village.mapImage)
-        ? `<img class="village-preview" src="${village.mapImage}" alt="Latest shared view of ${escapeHtml(village.villageName || "this village")}">`
-        : sharedVillageFallbackMap(village.buildings);
+      const visit = {
+        code,
+        village,
+        map: readSharedVillageMap(village),
+        online: payload.online === true,
+        updatedAt: Number(payload.updatedAt) || Date.now(),
+        camera: { x: WORLD_CENTER, y: WORLD_CENTER, zoom: 0.85 },
+        refreshTimer: 0,
+        drawFrame: 0,
+        fetching: false,
+        closed: false,
+        drag: null,
+        refs: {}
+      };
+      activeVillageVisit = visit;
       dom.modalLayer.innerHTML = `
         <div class="modal-backdrop">
-          <section class="sheet-modal modal-card village-visit-panel" role="dialog" aria-modal="true" aria-labelledby="visitVillageTitle">
-            <div class="sheet-heading"><div><span class="eyebrow">${payload.online ? "ONLINE VILLAGE" : "OFFLINE SNAPSHOT"}</span><h2 id="visitVillageTitle">${escapeHtml(String(village.villageName || "Wildroot Village"))}</h2></div><button class="sheet-close" type="button" aria-label="Go back">×</button></div>
-            <p class="modal-description">${escapeHtml(status)} · Code ${escapeHtml(code)}. Time is never simulated for visitors.</p>
-            ${preview}
+          <section class="sheet-modal modal-card village-visit-panel village-map-visit-panel" role="dialog" aria-modal="true" aria-labelledby="visitVillageTitle">
+            <div class="sheet-heading"><div><span id="visitVillageEyebrow" class="eyebrow"></span><h2 id="visitVillageTitle">${escapeHtml(String(village.villageName || "Wildroot Village"))}</h2></div><button class="sheet-close" type="button" aria-label="Go back">×</button></div>
+            <p id="visitVillageStatus" class="modal-description"></p>
+            <section class="village-map-viewer" aria-label="Read-only village map viewer">
+              <canvas id="visitedVillageCanvas" width="900" height="600" tabindex="0" aria-label="Read-only map of ${escapeHtml(String(village.villageName || "this village"))}. Drag to pan and scroll to zoom."></canvas>
+              <div class="village-map-status"><span id="visitVillageLiveState"></span><span>Drag to pan · Scroll to zoom</span></div>
+              <div class="village-map-controls" aria-label="Map controls"><button id="visitVillageZoomOut" type="button" aria-label="Zoom out">−</button><output id="visitVillageZoomLabel">85%</output><button id="visitVillageZoomIn" type="button" aria-label="Zoom in">+</button><button id="visitVillageCentre" type="button" aria-label="Centre map">◎</button></div>
+            </section>
             <div class="village-summary-grid">
-              <div><small>Day</small><strong>${Math.max(1, Math.floor(Number(village.day) || 1))} · ${escapeHtml(village.season?.icon || "◇")} ${escapeHtml(village.season?.name || "Season")}</strong></div>
-              <div><small>People</small><strong>${Math.max(0, Math.floor(Number(village.population) || 0)).toLocaleString()}</strong></div>
-              <div><small>Ecosystem</small><strong>${Math.round(eco)}%</strong></div>
-              <div><small>Coins</small><strong>${Math.max(0, Math.floor(Number(village.coins) || 0)).toLocaleString()}</strong></div>
-              <div><small>Food / Water</small><strong>${Math.floor(Number(village.resources?.food) || 0).toLocaleString()} / ${Math.floor(Number(village.resources?.water) || 0).toLocaleString()}</strong></div>
-              <div><small>Timber / Stone</small><strong>${Math.floor(Number(village.resources?.wood) || 0).toLocaleString()} / ${Math.floor(Number(village.resources?.stone) || 0).toLocaleString()}</strong></div>
+              <div><small>Village time</small><strong id="visitVillageDay"></strong></div>
+              <div><small>People</small><strong id="visitVillagePeople"></strong></div>
+              <div><small>Ecosystem</small><strong id="visitVillageEcosystem"></strong></div>
+              <div><small>Coins</small><strong id="visitVillageCoins"></strong></div>
+              <div><small>Food / Water</small><strong id="visitVillageFoodWater"></strong></div>
+              <div><small>Timber / Stone</small><strong id="visitVillageWoodStone"></strong></div>
             </div>
             <div class="menu-actions"><button id="visitVillageBackButton" class="primary-button" type="button">Back</button></div>
           </section>
         </div>`;
+      visit.canvas = document.getElementById("visitedVillageCanvas");
+      visit.refs = {
+        eyebrow: document.getElementById("visitVillageEyebrow"),
+        status: document.getElementById("visitVillageStatus"),
+        live: document.getElementById("visitVillageLiveState"),
+        zoom: document.getElementById("visitVillageZoomLabel"),
+        zoomIn: document.getElementById("visitVillageZoomIn"),
+        zoomOut: document.getElementById("visitVillageZoomOut"),
+        centre: document.getElementById("visitVillageCentre"),
+        day: document.getElementById("visitVillageDay"),
+        people: document.getElementById("visitVillagePeople"),
+        ecosystem: document.getElementById("visitVillageEcosystem"),
+        coins: document.getElementById("visitVillageCoins"),
+        foodWater: document.getElementById("visitVillageFoodWater"),
+        woodStone: document.getElementById("visitVillageWoodStone")
+      };
+      clampSharedVillageCamera(visit);
+      updateSharedVillageVisit(visit);
+      drawSharedVillageMap(visit);
+      attachSharedVillageMapControls(visit);
       dom.modalLayer.querySelector(".sheet-close").addEventListener("click", back);
       document.getElementById("visitVillageBackButton").addEventListener("click", back);
+      visit.refreshTimer = window.setInterval(() => refreshSharedVillageVisit(visit), VILLAGE_VISIT_REFRESH_INTERVAL_MS);
     } catch (error) {
       dom.modalLayer.innerHTML = `<div class="modal-backdrop"><section class="sheet-modal modal-card" role="dialog" aria-modal="true" aria-labelledby="visitVillageErrorTitle"><div class="sheet-heading"><div><span class="eyebrow">VIEW-ONLY VILLAGE VISITS</span><h2 id="visitVillageErrorTitle">Village unavailable</h2></div><button class="sheet-close" type="button" aria-label="Go back">×</button></div><p class="modal-description">${escapeHtml(error.message || "That code could not be opened.")}</p><div class="menu-actions"><button id="visitVillageTryAgainButton" class="primary-button" type="button">Try another code</button></div></section></div>`;
       dom.modalLayer.querySelector(".sheet-close").addEventListener("click", back);
@@ -9462,7 +9802,10 @@
     });
     window.addEventListener("beforeunload", saveGame);
     document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible") publishSharedVillage({ force: true });
+      if (document.visibilityState === "visible") {
+        publishSharedVillage({ force: true });
+        if (activeVillageVisit) refreshSharedVillageVisit(activeVillageVisit);
+      }
     });
   }
 
@@ -9541,6 +9884,34 @@
           }
           renderAll();
           drawMap(performance.now(), 0);
+        },
+        sharedVillageMapPreview() {
+          const snapshot = getSharedVillageSnapshot();
+          const map = readSharedVillageMap(snapshot);
+          const canvas = document.createElement("canvas");
+          canvas.width = 900;
+          canvas.height = 600;
+          const previousVisit = activeVillageVisit;
+          const visit = { map, canvas, camera: { x: WORLD_CENTER, y: WORLD_CENTER, zoom: 0.85 }, drawFrame: 0 };
+          activeVillageVisit = visit;
+          try {
+            clampSharedVillageCamera(visit);
+            drawSharedVillageMap(visit);
+            const pixels = canvas.getContext("2d").getImageData(0, 0, 1, 1).data;
+            return {
+            version: snapshot.version,
+            hasTerrain: Number.isFinite(Number(snapshot.map?.terrainSeed)),
+            buildingCount: map.buildings.length,
+            residentCount: map.residents.length,
+            bytes: JSON.stringify(snapshot).length,
+            painted: pixels[3] > 0
+            };
+          } finally {
+            activeVillageVisit = previousVisit;
+          }
+        },
+        sharedVillageSnapshot() {
+          return getSharedVillageSnapshot();
         },
         populationDynamics() {
           return {

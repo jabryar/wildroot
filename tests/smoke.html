@@ -85,6 +85,8 @@
       check("cottage used timber", Number.parseFloat(doc.getElementById("woodValue").textContent.replaceAll(",", "")) < 95, doc.getElementById("woodValue").textContent);
       check("farm accepts three workers while well stays passive", doc.getElementById("workersLabel").textContent.includes("3 jobs") && doc.querySelector('[data-building="farm"]')?.dataset.workerCapacity === "3", doc.getElementById("workersLabel").textContent);
       check("100x100 world label", doc.getElementById("coordinatesLabel").textContent.includes("100 × 100"));
+      const sharedMap = win.__wildrootTest.sharedVillageMapPreview();
+      check("interactive shared-village map snapshot renders", sharedMap.version === 2 && sharedMap.hasTerrain && sharedMap.buildingCount >= 4 && sharedMap.bytes < 850000 && sharedMap.painted, JSON.stringify(sharedMap));
 
       doc.getElementById("inspectTool").click();
       win.__wildrootTest.openBuildingType("farm");
@@ -111,6 +113,27 @@
       doc.getElementById("menuButton").click();
       await wait(80);
       check("pause menu", Boolean(doc.getElementById("resumeMenuButton")));
+      const ownerSnapshot = win.__wildrootTest.sharedVillageSnapshot();
+      const originalFetch = win.fetch;
+      try {
+        win.fetch = async () => new win.Response(JSON.stringify({ village: ownerSnapshot, online: true, updatedAt: Date.now() }), { status: 200, headers: { "content-type": "application/json" } });
+        doc.getElementById("visitVillageMenuButton").click();
+        await wait(80);
+        doc.getElementById("visitVillageCodeModal").value = "TEST12";
+        doc.getElementById("openVillageVisitButton").click();
+        await wait(160);
+        const visitorMap = doc.getElementById("visitedVillageCanvas");
+        check("visit viewer opens a pannable map", Boolean(visitorMap) && visitorMap.width === 900 && visitorMap.height === 600);
+        const visitorZoomBefore = doc.getElementById("visitVillageZoomLabel")?.textContent;
+        doc.getElementById("visitVillageZoomIn")?.click();
+        await wait(80);
+        check("visit viewer zoom control", Boolean(visitorZoomBefore) && doc.getElementById("visitVillageZoomLabel")?.textContent !== visitorZoomBefore);
+        doc.getElementById("visitVillageBackButton")?.click();
+        await wait(80);
+        check("visit viewer returns to menu", Boolean(doc.getElementById("resumeMenuButton")));
+      } finally {
+        win.fetch = originalFetch;
+      }
       doc.getElementById("achievementMenuButton").click();
       await wait(80);
       doc.querySelector(".sheet-close").click();

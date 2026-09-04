@@ -64,4 +64,4 @@ Do not create a `dist` folder or copy game files by hand. Earlier deployments fa
 
 The Worker serves the game normally and handles only `/api/villages/<CODE>` itself. A six-character code is public and lets someone view a saved image and summary of the village. A separate private owner token, stored only in the owner's local save, is required to update or stop sharing that code.
 
-Each shared snapshot expires from its **online** status after 90 seconds without an update. It remains viewable, but it never simulates or changes on the server.
+While the owner has the game open, it publishes a fresh read-only map snapshot every five seconds. A visit viewer polls the same interval and only shows the owner’s received time and state—it never simulates independently. After 20 seconds without an owner update, the visitor sees the last map as paused/offline.
