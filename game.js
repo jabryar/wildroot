@@ -22,7 +22,11 @@
   const SAVE_VERSION = 2;
   const VILLAGE_VISIT_CODE_LENGTH = 6;
   const VILLAGE_SHARE_PUBLISH_INTERVAL_MS = 5_000;
-  const VILLAGE_VISIT_REFRESH_INTERVAL_MS = 5_000;
+  const VILLAGE_VISIT_REFRESH_DEFAULT_INTERVAL_MS = 5_000;
+  const VILLAGE_VISIT_REFRESH_MIN_INTERVAL_MS = 500;
+  const VILLAGE_VISIT_REFRESH_MAX_INTERVAL_MS = 10_000;
+  const VILLAGE_VISIT_REFRESH_STEP_MS = 500;
+  const VILLAGE_VISITOR_HEARTBEAT_INTERVAL_MS = 5_000;
   const SEASON_LENGTH = 12;
   const WEATHER_FADE_DAYS = 0.12;
   const EVERGREEN_TREE_SHARE = 0.1;
@@ -1702,6 +1706,7 @@
   let standingWildTreeCountCache = null;
   let sharePublishInFlight = false;
   let lastSharePublishAttemptAt = 0;
+  let villageVisitorCount = null;
   let activeVillageVisit = null;
 
   const dom = {};
@@ -2713,6 +2718,47 @@
     return payload;
   }
 
+  function setVillageVisitorCount(value) {
+    const parsed = Number(value);
+    villageVisitorCount = Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : null;
+    const countNode = document.getElementById("villageVisitorCount");
+    const statusNode = document.getElementById("villageVisitorStatus");
+    if (!countNode || !statusNode) return;
+    if (villageVisitorCount === null) {
+      countNode.textContent = "Checking…";
+      statusNode.textContent = "Checking whether anyone is viewing your village.";
+      return;
+    }
+    countNode.textContent = `${villageVisitorCount} ${villageVisitorCount === 1 ? "visitor" : "visitors"} now`;
+    statusNode.textContent = villageVisitorCount === 0
+      ? "No one is viewing your village right now."
+      : `${villageVisitorCount} ${villageVisitorCount === 1 ? "person is" : "people are"} viewing your village right now.`;
+  }
+
+  function formatVillageVisitRefreshInterval(milliseconds) {
+    const seconds = Math.round(milliseconds / 100) / 10;
+    return `${Number.isInteger(seconds) ? seconds : seconds.toFixed(1)} second${seconds === 1 ? "" : "s"}`;
+  }
+
+  function setSharedVillageRefreshInterval(visit, milliseconds) {
+    const steps = Math.round((Number(milliseconds) - VILLAGE_VISIT_REFRESH_MIN_INTERVAL_MS) / VILLAGE_VISIT_REFRESH_STEP_MS);
+    const interval = clamp(
+      VILLAGE_VISIT_REFRESH_MIN_INTERVAL_MS + steps * VILLAGE_VISIT_REFRESH_STEP_MS,
+      VILLAGE_VISIT_REFRESH_MIN_INTERVAL_MS,
+      VILLAGE_VISIT_REFRESH_MAX_INTERVAL_MS
+    );
+    visit.refreshIntervalMs = interval;
+    if (visit.refs.refreshInput) visit.refs.refreshInput.value = String(interval / 1000);
+    if (visit.refs.refreshLabel) visit.refs.refreshLabel.textContent = formatVillageVisitRefreshInterval(interval);
+    if (visit.refreshTimer) {
+      window.clearInterval(visit.refreshTimer);
+      visit.refreshTimer = 0;
+    }
+    if (activeVillageVisit === visit && !visit.closed) {
+      visit.refreshTimer = window.setInterval(() => refreshSharedVillageVisit(visit), interval);
+    }
+  }
+
   async function publishSharedVillage({ force = false, silent = true } = {}) {
     const share = getVillageShare();
     if (!gameActive || !share.enabled || !share.code || !share.ownerToken || sharePublishInFlight) return false;
@@ -2726,6 +2772,7 @@
         body: JSON.stringify({ ownerToken: share.ownerToken, snapshot: getSharedVillageSnapshot() })
       });
       share.lastPublishedAt = Number(payload.updatedAt) || now;
+      if (Number.isFinite(Number(payload.visitors))) setVillageVisitorCount(payload.visitors);
       if (!silent) showToast("Village shared", `Visitors can use ${share.code} while this village is open.`, "⌁");
       return true;
     } catch (error) {
@@ -2750,6 +2797,7 @@
     const share = getVillageShare();
     if (!share.code || !share.ownerToken) {
       share.enabled = false;
+      setVillageVisitorCount(null);
       saveGame();
       return true;
     }
@@ -2760,6 +2808,7 @@
       });
       share.enabled = false;
       share.lastPublishedAt = 0;
+      setVillageVisitorCount(null);
       saveGame();
       showToast("Village sharing stopped", "Your visit code no longer opens this village.", "○");
       return true;
@@ -6522,7 +6571,8 @@
           <div class="sheet-heading"><div><span class="eyebrow">VIEW-ONLY VILLAGE VISITS</span><h2 id="shareVillageTitle">Share ${escapeHtml(state.villageName)}</h2></div><button class="sheet-close" type="button" aria-label="Back to menu">×</button></div>
           <p class="modal-description">Visitors can pan around a fresh read-only map and summary of this village with its code. They cannot run time, trade, build, log, or alter anything.</p>
           ${isSharing
-            ? `<div class="market-balance"><strong>Your village visit code</strong><br><output class="village-share-code">${escapeHtml(share.code)}</output><small>This map updates for visitors every few seconds while this game remains open. When you leave, it stays paused at your last shared time.</small></div>`
+            ? `<div class="market-balance"><strong>Your village visit code</strong><br><output class="village-share-code">${escapeHtml(share.code)}</output><small>This map updates for visitors every few seconds while this game remains open. When you leave, it stays paused at your last shared time.</small></div>
+              <div class="village-visitor-presence" aria-live="polite"><span class="eyebrow">VISITORS NOW</span><strong id="villageVisitorCount">Checking…</strong><small id="villageVisitorStatus">Checking whether anyone is viewing your village.</small></div>`
             : `<div class="market-balance"><strong>Sharing is off</strong><br><small>Turn it on to create a six-character code for this village. Your private owner token stays in this local save and is never shown to visitors.</small></div>`}
           <div class="menu-actions">
             ${isSharing ? '<button id="copyVillageCodeButton" class="primary-button" type="button">Copy visit code</button><button id="refreshVillageShareButton" class="secondary-button" type="button">Refresh shared village</button><button id="stopVillageShareButton" class="secondary-button danger-button" type="button">Stop sharing</button>' : '<button id="enableVillageShareButton" class="primary-button" type="button">Create village visit code</button>'}
@@ -6551,6 +6601,10 @@
       if (await stopVillageSharing()) showVillageSharePanel();
       else event.currentTarget.disabled = false;
     });
+    if (isSharing) {
+      setVillageVisitorCount(null);
+      publishSharedVillage({ force: true });
+    }
   }
 
   function showVillageVisitPrompt(returnToMenu = false) {
@@ -6797,13 +6851,31 @@
     });
   }
 
+  async function heartbeatVillageVisitor(visit, leaving = false) {
+    if (!visit?.visitorToken || (!leaving && (visit.closed || visit.presenceInFlight))) return;
+    if (!leaving) visit.presenceInFlight = true;
+    try {
+      await villageApiRequest(`/api/villages/${encodeURIComponent(visit.code)}/visitors`, {
+        method: leaving ? "DELETE" : "POST",
+        keepalive: true,
+        body: JSON.stringify({ visitorToken: visit.visitorToken })
+      });
+    } catch {
+      // Presence is best-effort. The server also expires missed heartbeats.
+    } finally {
+      if (!leaving) visit.presenceInFlight = false;
+    }
+  }
+
   function clearActiveVillageVisit() {
     const visit = activeVillageVisit;
     if (!visit) return;
     if (visit.refreshTimer) window.clearInterval(visit.refreshTimer);
+    if (visit.presenceTimer) window.clearInterval(visit.presenceTimer);
     if (visit.drawFrame) window.cancelAnimationFrame(visit.drawFrame);
     visit.closed = true;
     activeVillageVisit = null;
+    heartbeatVillageVisitor(visit, true);
   }
 
   async function refreshSharedVillageVisit(visit) {
@@ -6844,6 +6916,10 @@
         updatedAt: Number(payload.updatedAt) || Date.now(),
         camera: { x: WORLD_CENTER, y: WORLD_CENTER, zoom: 0.85 },
         refreshTimer: 0,
+        refreshIntervalMs: VILLAGE_VISIT_REFRESH_DEFAULT_INTERVAL_MS,
+        presenceTimer: 0,
+        presenceInFlight: false,
+        visitorToken: secureRandomHex(16),
         drawFrame: 0,
         fetching: false,
         closed: false,
@@ -6856,6 +6932,7 @@
           <section class="sheet-modal modal-card village-visit-panel village-map-visit-panel" role="dialog" aria-modal="true" aria-labelledby="visitVillageTitle">
             <div class="sheet-heading"><div><span id="visitVillageEyebrow" class="eyebrow"></span><h2 id="visitVillageTitle">${escapeHtml(String(village.villageName || "Wildroot Village"))}</h2></div><button class="sheet-close" type="button" aria-label="Go back">×</button></div>
             <p id="visitVillageStatus" class="modal-description"></p>
+            <div class="village-visit-refresh"><label for="visitVillageRefreshRate">Map update rate <output id="visitVillageRefreshLabel">5 seconds</output></label><input id="visitVillageRefreshRate" type="range" min="0.5" max="10" step="0.5" value="5" aria-describedby="visitVillageRefreshHint"><small id="visitVillageRefreshHint">Choose how often this map checks for the owner's latest update.</small></div>
             <section class="village-map-viewer" aria-label="Read-only village map viewer">
               <canvas id="visitedVillageCanvas" width="900" height="600" tabindex="0" aria-label="Read-only map of ${escapeHtml(String(village.villageName || "this village"))}. Drag to pan and scroll to zoom."></canvas>
               <div class="village-map-status"><span id="visitVillageLiveState"></span><span>Drag to pan · Scroll to zoom</span></div>
@@ -6881,6 +6958,8 @@
         zoomIn: document.getElementById("visitVillageZoomIn"),
         zoomOut: document.getElementById("visitVillageZoomOut"),
         centre: document.getElementById("visitVillageCentre"),
+        refreshInput: document.getElementById("visitVillageRefreshRate"),
+        refreshLabel: document.getElementById("visitVillageRefreshLabel"),
         day: document.getElementById("visitVillageDay"),
         people: document.getElementById("visitVillagePeople"),
         ecosystem: document.getElementById("visitVillageEcosystem"),
@@ -6892,9 +6971,14 @@
       updateSharedVillageVisit(visit);
       drawSharedVillageMap(visit);
       attachSharedVillageMapControls(visit);
+      visit.refs.refreshInput.addEventListener("input", event => {
+        setSharedVillageRefreshInterval(visit, Number(event.currentTarget.value) * 1000);
+      });
       dom.modalLayer.querySelector(".sheet-close").addEventListener("click", back);
       document.getElementById("visitVillageBackButton").addEventListener("click", back);
-      visit.refreshTimer = window.setInterval(() => refreshSharedVillageVisit(visit), VILLAGE_VISIT_REFRESH_INTERVAL_MS);
+      setSharedVillageRefreshInterval(visit, VILLAGE_VISIT_REFRESH_DEFAULT_INTERVAL_MS);
+      heartbeatVillageVisitor(visit);
+      visit.presenceTimer = window.setInterval(() => heartbeatVillageVisitor(visit), VILLAGE_VISITOR_HEARTBEAT_INTERVAL_MS);
     } catch (error) {
       dom.modalLayer.innerHTML = `<div class="modal-backdrop"><section class="sheet-modal modal-card" role="dialog" aria-modal="true" aria-labelledby="visitVillageErrorTitle"><div class="sheet-heading"><div><span class="eyebrow">VIEW-ONLY VILLAGE VISITS</span><h2 id="visitVillageErrorTitle">Village unavailable</h2></div><button class="sheet-close" type="button" aria-label="Go back">×</button></div><p class="modal-description">${escapeHtml(error.message || "That code could not be opened.")}</p><div class="menu-actions"><button id="visitVillageTryAgainButton" class="primary-button" type="button">Try another code</button></div></section></div>`;
       dom.modalLayer.querySelector(".sheet-close").addEventListener("click", back);
@@ -9800,11 +9884,17 @@
       if (gameActive && !dom.modalLayer.children.length && event.key === "-") setMapZoom(state.camera.zoom / 1.2);
       if (gameActive && !dom.modalLayer.children.length && event.key.toLowerCase() === "f") centreMap();
     });
-    window.addEventListener("beforeunload", saveGame);
+    window.addEventListener("beforeunload", () => {
+      clearActiveVillageVisit();
+      saveGame();
+    });
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "visible") {
         publishSharedVillage({ force: true });
-        if (activeVillageVisit) refreshSharedVillageVisit(activeVillageVisit);
+        if (activeVillageVisit) {
+          refreshSharedVillageVisit(activeVillageVisit);
+          heartbeatVillageVisitor(activeVillageVisit);
+        }
       }
     });
   }

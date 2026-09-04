@@ -1631,12 +1631,75 @@ kbd {
   font-size: 18px;
 }
 
+.village-visitor-presence {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 10px;
+  margin: -3px 0 14px;
+  padding: 10px 12px;
+  border: 1px solid rgba(142, 205, 130, .3);
+  border-radius: 9px;
+  color: var(--ink);
+  background: rgba(83, 143, 77, .1);
+}
+
+.village-visitor-presence .eyebrow {
+  grid-column: 1 / -1;
+}
+
+.village-visitor-presence strong {
+  color: var(--green-bright);
+  font-size: 16px;
+}
+
+.village-visitor-presence small {
+  align-self: center;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.35;
+}
+
 .village-visit-panel { max-width: 720px; }
 .village-visit-panel .modal-description { margin-bottom: 14px; }
 
 .village-map-visit-panel {
   width: min(100%, 920px);
   max-height: min(92dvh, 900px);
+}
+
+.village-visit-refresh {
+  display: grid;
+  gap: 5px;
+  margin: 0 0 12px;
+  padding: 9px 10px;
+  border: 1px solid rgba(150, 211, 129, .25);
+  border-radius: 9px;
+  background: rgba(55, 105, 62, .11);
+}
+
+.village-visit-refresh label {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.village-visit-refresh output {
+  color: var(--green-bright);
+  font-weight: 800;
+}
+
+.village-visit-refresh input {
+  width: 100%;
+  margin: 0;
+  accent-color: var(--green-bright);
+}
+
+.village-visit-refresh small {
+  color: var(--faint);
+  font-size: 9px;
+  line-height: 1.35;
 }
 
 .village-map-viewer {

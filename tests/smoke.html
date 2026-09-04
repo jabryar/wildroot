@@ -116,7 +116,25 @@
       const ownerSnapshot = win.__wildrootTest.sharedVillageSnapshot();
       const originalFetch = win.fetch;
       try {
-        win.fetch = async () => new win.Response(JSON.stringify({ village: ownerSnapshot, online: true, updatedAt: Date.now() }), { status: 200, headers: { "content-type": "application/json" } });
+        const villageRequests = [];
+        win.fetch = async (url, options = {}) => {
+          const requestUrl = String(url);
+          const method = options.method || "GET";
+          villageRequests.push({ url: requestUrl, method });
+          const payload = requestUrl.endsWith("/visitors")
+            ? { ok: true, visitors: 1 }
+            : method === "PUT"
+              ? { ok: true, updatedAt: Date.now(), visitors: 2 }
+              : { village: ownerSnapshot, online: true, updatedAt: Date.now(), visitors: 2 };
+          return new win.Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } });
+        };
+        doc.getElementById("shareVillageMenuButton").click();
+        await wait(80);
+        doc.getElementById("enableVillageShareButton").click();
+        await wait(160);
+        check("owner sees current visitor count", doc.getElementById("villageVisitorCount")?.textContent === "2 visitors now", doc.getElementById("villageVisitorCount")?.textContent || "missing");
+        doc.getElementById("shareVillageBackButton").click();
+        await wait(80);
         doc.getElementById("visitVillageMenuButton").click();
         await wait(80);
         doc.getElementById("visitVillageCodeModal").value = "TEST12";
@@ -128,9 +146,17 @@
         doc.getElementById("visitVillageZoomIn")?.click();
         await wait(80);
         check("visit viewer zoom control", Boolean(visitorZoomBefore) && doc.getElementById("visitVillageZoomLabel")?.textContent !== visitorZoomBefore);
+        const refreshRate = doc.getElementById("visitVillageRefreshRate");
+        check("visit viewer offers a 0.5–10 second update slider", refreshRate?.min === "0.5" && refreshRate?.max === "10" && refreshRate?.step === "0.5");
+        refreshRate.value = "0.5";
+        refreshRate.dispatchEvent(new win.Event("input", { bubbles: true }));
+        await wait(40);
+        check("visit viewer applies the chosen update rate", doc.getElementById("visitVillageRefreshLabel")?.textContent === "0.5 seconds", doc.getElementById("visitVillageRefreshLabel")?.textContent || "missing");
+        check("visitor presence sends a heartbeat", villageRequests.some(request => request.method === "POST" && request.url.endsWith("/visitors")));
         doc.getElementById("visitVillageBackButton")?.click();
         await wait(80);
         check("visit viewer returns to menu", Boolean(doc.getElementById("resumeMenuButton")));
+        check("visitor presence ends when the viewer closes", villageRequests.some(request => request.method === "DELETE" && request.url.endsWith("/visitors")));
       } finally {
         win.fetch = originalFetch;
       }
