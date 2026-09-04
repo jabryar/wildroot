@@ -23,16 +23,16 @@ After the user asks to deploy or push, commit only the intended files and run:
 git push origin main
 ```
 
-Pushing to `main` runs `.github/workflows/deploy-cloudflare.yml`. That workflow uses the repository secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`, then runs `wrangler deploy`. Never print, edit, or ask the user to paste either secret.
+Pushing to `main` triggers the connected **Cloudflare Workers Build** for `wildroot`. Cloudflare runs `npx wrangler deploy` using the repository's `wrangler.toml`. The deployment is successful only when the **Workers Builds: wildroot** check for that commit is green.
 
-Check the GitHub Actions run after pushing. A successful deployment is the completion of the **Deploy Wildroot** job. The deployed Worker is named `wildroot`.
+Do not add a second GitHub Actions deployment workflow. Cloudflare is already connected to this repository, and two simultaneous Wrangler deployments can conflict or leave a misleading failed GitHub check. The deployed Worker is named `wildroot`.
 
 ## First-time Cloudflare setup
 
-1. Create a Cloudflare API token with permission to edit Workers and Durable Objects for the account.
-2. Add that token to the repository as `CLOUDFLARE_API_TOKEN`.
-3. Add the numeric Cloudflare account ID as `CLOUDFLARE_ACCOUNT_ID`.
-4. Push to `main` or run the **Deploy to Cloudflare** workflow manually from GitHub Actions.
+1. In Cloudflare, connect the `jabryar/wildroot` GitHub repository to the **wildroot** Workers Build, deploying the `main` branch.
+2. Leave the build command empty, set the deploy command to `npx wrangler deploy`, and set the root directory to `/` (the repository root).
+3. Ensure the Cloudflare connection has permission to deploy Workers and create/update Durable Objects.
+4. Push to `main`, then wait for the **Workers Builds: wildroot** check to pass.
 
 The first deployment applies the `v1` Durable Object migration automatically. Do not remove the migration entry in `wrangler.toml`; future Durable Object schema changes need a new migration tag.
 
