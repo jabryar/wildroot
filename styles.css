@@ -1572,6 +1572,118 @@ kbd {
   background: rgba(4, 20, 15, 0.45);
 }
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.village-visit-card {
+  margin: 17px 0;
+  padding: 12px;
+  border: 1px solid rgba(133, 191, 126, 0.25);
+  border-radius: 11px;
+  background: rgba(68, 125, 73, 0.09);
+}
+
+.village-visit-card p {
+  margin: 5px 0 10px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.visit-code-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 7px;
+}
+
+.visit-code-input,
+.village-share-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-weight: 800;
+  letter-spacing: .14em;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.visit-code-row .secondary-button { min-height: 42px; }
+
+.village-share-code {
+  display: inline-block;
+  margin: 7px 0 2px;
+  padding: 8px 10px;
+  border: 1px solid rgba(150, 211, 129, .38);
+  border-radius: 8px;
+  color: var(--green-bright);
+  background: rgba(8, 29, 21, .48);
+  font-size: 18px;
+}
+
+.village-visit-panel { max-width: 720px; }
+.village-visit-panel .modal-description { margin-bottom: 14px; }
+
+.village-preview {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1.35 / 1;
+  margin: 12px 0;
+  border: 1px solid rgba(157, 205, 139, .27);
+  border-radius: 10px;
+  overflow: hidden;
+  object-fit: cover;
+  background: #244a32;
+}
+
+.village-preview-map {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1.35 / 1;
+  margin: 12px 0;
+  overflow: hidden;
+  border: 1px solid rgba(157, 205, 139, .27);
+  border-radius: 10px;
+  background: repeating-linear-gradient(0deg, rgba(210, 231, 164, .06) 0 1px, transparent 1px 5%), repeating-linear-gradient(90deg, rgba(210, 231, 164, .06) 0 1px, transparent 1px 5%), #315f40;
+}
+
+.village-preview-building {
+  position: absolute;
+  min-width: 4px;
+  min-height: 4px;
+  border: 1px solid rgba(241, 210, 143, .8);
+  border-radius: 2px;
+  background: rgba(112, 74, 48, .82);
+}
+
+.village-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.village-summary-grid > div {
+  padding: 9px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, .045);
+}
+
+.village-summary-grid small {
+  display: block;
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
+.village-summary-grid strong { font-size: 13px; }
+
 .difficulty-fieldset {
   border: 0;
   padding: 0;
@@ -2761,6 +2873,11 @@ kbd {
 
   .start-content h2 {
     font-size: 34px;
+  }
+
+  .visit-code-row,
+  .village-summary-grid {
+    grid-template-columns: 1fr;
   }
 
   .achievement-grid {

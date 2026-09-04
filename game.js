@@ -20,6 +20,9 @@
   const MAX_SAVE_SLOTS = 3;
   const ACHIEVEMENT_KEY = "wildroot-village-achievements-v1";
   const SAVE_VERSION = 2;
+  const VILLAGE_VISIT_CODE_LENGTH = 6;
+  const VILLAGE_SHARE_PUBLISH_INTERVAL_MS = 60_000;
+  const VILLAGE_ONLINE_WINDOW_MS = 90_000;
   const SEASON_LENGTH = 12;
   const WEATHER_FADE_DAYS = 0.12;
   const EVERGREEN_TREE_SHARE = 0.1;
@@ -1697,6 +1700,8 @@
   let nextResidentExpiry = Infinity;
   const remoteLoggingTargetCache = new Map();
   let standingWildTreeCountCache = null;
+  let sharePublishInFlight = false;
+  let lastSharePublishAttemptAt = 0;
 
   const dom = {};
 
@@ -2294,6 +2299,7 @@
       cityMarketEvent: null,
       nextCityMarketEventAt: null,
       marketHistory: { firstBuiltAt: null, lastObservedAt: null, seasonsSeen: [] },
+      villageShare: { enabled: false, code: "", ownerToken: "", lastPublishedAt: 0 },
       ecosystem,
       terrainSeed: seed ^ 0x6d2b79f5,
       buildings: [],
@@ -2498,6 +2504,7 @@
     merged.nextCityMarketEventAt = Number.isFinite(Number(loaded.nextCityMarketEventAt))
       ? Number(loaded.nextCityMarketEventAt)
       : null;
+    normaliseVillageShare(merged, loaded.villageShare);
     merged.ecosystem = { ...fallback.ecosystem, ...(loaded.ecosystem || {}) };
     merged.stats = { ...fallback.stats, ...(loaded.stats || {}) };
     merged.buffs = { ...(loaded.buffs || {}) };
@@ -2566,6 +2573,137 @@
     clampResourcesToStorage(merged);
     merged.paused = true;
     return merged;
+  }
+
+  function normaliseVillageVisitCode(value) {
+    const code = String(value || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+    return new RegExp(`^[A-Z0-9]{${VILLAGE_VISIT_CODE_LENGTH}}$`).test(code) ? code : "";
+  }
+
+  function normaliseVillageShare(target = state, savedShare = target?.villageShare) {
+    const share = savedShare && typeof savedShare === "object" ? savedShare : {};
+    target.villageShare = {
+      enabled: share.enabled === true,
+      code: normaliseVillageVisitCode(share.code),
+      ownerToken: /^[a-f0-9]{48,128}$/i.test(String(share.ownerToken || "")) ? String(share.ownerToken) : "",
+      lastPublishedAt: Math.max(0, Number(share.lastPublishedAt) || 0)
+    };
+    return target.villageShare;
+  }
+
+  function secureRandomHex(byteLength = 24) {
+    const values = new Uint8Array(byteLength);
+    if (globalThis.crypto?.getRandomValues) globalThis.crypto.getRandomValues(values);
+    else for (let index = 0; index < values.length; index++) values[index] = Math.floor(Math.random() * 256);
+    return [...values].map(value => value.toString(16).padStart(2, "0")).join("");
+  }
+
+  function createVillageVisitCode() {
+    const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    const values = new Uint8Array(VILLAGE_VISIT_CODE_LENGTH);
+    if (globalThis.crypto?.getRandomValues) globalThis.crypto.getRandomValues(values);
+    else for (let index = 0; index < values.length; index++) values[index] = Math.floor(Math.random() * 256);
+    return [...values].map(value => alphabet[value % alphabet.length]).join("");
+  }
+
+  function getVillageShare(target = state) {
+    return normaliseVillageShare(target);
+  }
+
+  function getSharedVillageSnapshot() {
+    const share = getVillageShare();
+    const season = getSeason();
+    let mapImage = "";
+    try {
+      mapImage = dom.gameCanvas?.toDataURL("image/jpeg", 0.68) || "";
+      if (mapImage.length > 700_000) mapImage = "";
+    } catch {
+      mapImage = "";
+    }
+    return {
+      version: 1,
+      code: share.code,
+      villageName: String(state.villageName || "Wildroot Village").slice(0, 40),
+      day: Math.max(1, Math.floor(Number(state.day) || 1)),
+      dayProgress: clamp(Number(state.dayProgress) || 0, 0, 0.999999),
+      season: { id: season.id, name: season.name, icon: season.icon },
+      population: Math.max(0, Math.floor(Number(state.population) || 0)),
+      coins: Math.max(0, Math.floor(Number(state.coins) || 0)),
+      resources: Object.fromEntries(["food", "water", "wood", "stone"].map(resource => [resource, Math.max(0, Math.floor(Number(state.resources?.[resource]) || 0))])),
+      ecosystem: Object.fromEntries(Object.keys(ECO_LABELS).map(metric => [metric, clamp(Math.round(Number(state.ecosystem?.[metric]) || 0), 0, 100)])),
+      buildingCount: state.buildings.length,
+      buildings: state.buildings.slice(0, 500).map(building => ({
+        type: String(building.type || ""), x: Math.round(Number(building.x) || 0), y: Math.round(Number(building.y) || 0),
+        w: Math.max(1, Math.round(Number(building.w) || 1)), h: Math.max(1, Math.round(Number(building.h) || 1))
+      })),
+      mapImage
+    };
+  }
+
+  async function villageApiRequest(path, options = {}) {
+    const response = await fetch(path, {
+      ...options,
+      headers: { "content-type": "application/json", ...(options.headers || {}) }
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(payload.error || "The village service could not complete that request.");
+    return payload;
+  }
+
+  async function publishSharedVillage({ force = false, silent = true } = {}) {
+    const share = getVillageShare();
+    if (!gameActive || !share.enabled || !share.code || !share.ownerToken || sharePublishInFlight) return false;
+    const now = Date.now();
+    if (!force && now - lastSharePublishAttemptAt < VILLAGE_SHARE_PUBLISH_INTERVAL_MS) return false;
+    lastSharePublishAttemptAt = now;
+    sharePublishInFlight = true;
+    try {
+      const payload = await villageApiRequest(`/api/villages/${encodeURIComponent(share.code)}`, {
+        method: "PUT",
+        body: JSON.stringify({ ownerToken: share.ownerToken, snapshot: getSharedVillageSnapshot() })
+      });
+      share.lastPublishedAt = Number(payload.updatedAt) || now;
+      if (!silent) showToast("Village shared", `Visitors can use ${share.code} while this village is open.`, "⌁");
+      return true;
+    } catch (error) {
+      if (!silent) showToast("Village not shared", error.message || "Check the Cloudflare deployment and try again.", "!");
+      console.warn("Village sharing update failed", error);
+      return false;
+    } finally {
+      sharePublishInFlight = false;
+    }
+  }
+
+  function enableVillageSharing() {
+    const share = getVillageShare();
+    if (!share.code) share.code = createVillageVisitCode();
+    if (!share.ownerToken) share.ownerToken = secureRandomHex();
+    share.enabled = true;
+    saveGame();
+    return publishSharedVillage({ force: true, silent: false });
+  }
+
+  async function stopVillageSharing() {
+    const share = getVillageShare();
+    if (!share.code || !share.ownerToken) {
+      share.enabled = false;
+      saveGame();
+      return true;
+    }
+    try {
+      await villageApiRequest(`/api/villages/${encodeURIComponent(share.code)}`, {
+        method: "DELETE",
+        body: JSON.stringify({ ownerToken: share.ownerToken })
+      });
+      share.enabled = false;
+      share.lastPublishedAt = 0;
+      saveGame();
+      showToast("Village sharing stopped", "Your visit code no longer opens this village.", "○");
+      return true;
+    } catch (error) {
+      showToast("Could not stop sharing", error.message || "Try again when you are online.", "!");
+      return false;
+    }
   }
 
   function migrateLegacyState(loaded) {
@@ -6031,8 +6169,23 @@
         dom.modalLayer.innerHTML = "";
         addLog("The Steward returned to the planning desk.");
         renderAll();
+        publishSharedVillage({ force: true });
       });
     }
+
+    const visitInput = document.getElementById("visitVillageCode");
+    const visitVillage = () => {
+      const code = normaliseVillageVisitCode(visitInput.value);
+      if (!code) {
+        visitInput.focus();
+        showToast("Enter a visit code", "Use the six letters and numbers shared by the village owner.", "!");
+        return;
+      }
+      showVillageVisit(code, false);
+    };
+    visitInput.addEventListener("input", () => { visitInput.value = visitInput.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, VILLAGE_VISIT_CODE_LENGTH); });
+    visitInput.addEventListener("keydown", event => { if (event.key === "Enter") { event.preventDefault(); visitVillage(); } });
+    document.getElementById("visitVillageButton").addEventListener("click", visitVillage);
 
     document.querySelectorAll(".difficulty-option input").forEach(input => {
       input.addEventListener("change", () => {
@@ -6238,6 +6391,8 @@
             <button id="importMenuButton" class="secondary-button" type="button">Import save</button>
             <input id="importSaveInput" type="file" accept="application/json,.json" hidden>
             <button id="switchSlotMenuButton" class="secondary-button" type="button">Switch village slot</button>
+            <button id="shareVillageMenuButton" class="secondary-button" type="button">Share village</button>
+            <button id="visitVillageMenuButton" class="secondary-button" type="button">Visit a village</button>
             <button id="feedbackMenuButton" class="secondary-button" type="button">Send feedback ↗</button>
             ${state.placementTutorialCompleted ? "" : '<button id="tutorialMenuButton" class="secondary-button" type="button">Building tutorial</button>'}
             <button id="blogMenuButton" class="secondary-button" type="button">Village blog</button>
@@ -6258,6 +6413,8 @@
     document.getElementById("importMenuButton").addEventListener("click", () => document.getElementById("importSaveInput").click());
     document.getElementById("importSaveInput").addEventListener("change", event => importSaveFile(event.target.files?.[0]));
     document.getElementById("switchSlotMenuButton").addEventListener("click", showStartScreen);
+    document.getElementById("shareVillageMenuButton").addEventListener("click", showVillageSharePanel);
+    document.getElementById("visitVillageMenuButton").addEventListener("click", () => showVillageVisitPrompt(true));
     document.getElementById("feedbackMenuButton").addEventListener("click", () => {
       window.open("https://forms.gle/9ze39XTDjKvBnmjL9", "_blank", "noopener,noreferrer");
     });
@@ -6269,6 +6426,140 @@
       if (!window.confirm("Leave this settlement and begin again? Its save will be replaced when the new village starts.")) return;
       showStartScreen();
     });
+  }
+
+  async function copyVillageCode(code) {
+    try {
+      await navigator.clipboard.writeText(code);
+      showToast("Visit code copied", `${code} is ready to share.`, "✓");
+    } catch {
+      const input = document.createElement("input");
+      input.value = code;
+      document.body.append(input);
+      input.select();
+      document.execCommand("copy");
+      input.remove();
+      showToast("Visit code copied", `${code} is ready to share.`, "✓");
+    }
+  }
+
+  function showVillageSharePanel() {
+    if (!gameActive) return;
+    state.paused = true;
+    modalClosable = true;
+    const share = getVillageShare();
+    const isSharing = share.enabled && share.code && share.ownerToken;
+    dom.modalLayer.innerHTML = `
+      <div class="modal-backdrop">
+        <section class="sheet-modal modal-card village-visit-panel" role="dialog" aria-modal="true" aria-labelledby="shareVillageTitle">
+          <div class="sheet-heading"><div><span class="eyebrow">VIEW-ONLY VILLAGE VISITS</span><h2 id="shareVillageTitle">Share ${escapeHtml(state.villageName)}</h2></div><button class="sheet-close" type="button" aria-label="Back to menu">×</button></div>
+          <p class="modal-description">Visitors can view a fresh picture and summary of this village with its code. They cannot run time, trade, build, log, or alter anything.</p>
+          ${isSharing
+            ? `<div class="market-balance"><strong>Your village visit code</strong><br><output class="village-share-code">${escapeHtml(share.code)}</output><small>This village shows as online while this game remains open. Its last snapshot remains view-only when you leave.</small></div>`
+            : `<div class="market-balance"><strong>Sharing is off</strong><br><small>Turn it on to create a six-character code for this village. Your private owner token stays in this local save and is never shown to visitors.</small></div>`}
+          <div class="menu-actions">
+            ${isSharing ? '<button id="copyVillageCodeButton" class="primary-button" type="button">Copy visit code</button><button id="refreshVillageShareButton" class="secondary-button" type="button">Refresh shared village</button><button id="stopVillageShareButton" class="secondary-button danger-button" type="button">Stop sharing</button>' : '<button id="enableVillageShareButton" class="primary-button" type="button">Create village visit code</button>'}
+            <button id="shareVillageBackButton" class="secondary-button" type="button">Back to menu</button>
+          </div>
+        </section>
+      </div>`;
+    const backToMenu = () => openMenu(true);
+    dom.modalLayer.querySelector(".sheet-close").addEventListener("click", backToMenu);
+    document.getElementById("shareVillageBackButton").addEventListener("click", backToMenu);
+    document.getElementById("copyVillageCodeButton")?.addEventListener("click", () => copyVillageCode(share.code));
+    document.getElementById("enableVillageShareButton")?.addEventListener("click", async event => {
+      event.currentTarget.disabled = true;
+      await enableVillageSharing();
+      showVillageSharePanel();
+    });
+    document.getElementById("refreshVillageShareButton")?.addEventListener("click", async event => {
+      event.currentTarget.disabled = true;
+      const published = await publishSharedVillage({ force: true, silent: false });
+      if (published) saveGame();
+      event.currentTarget.disabled = false;
+    });
+    document.getElementById("stopVillageShareButton")?.addEventListener("click", async event => {
+      if (!window.confirm("Stop sharing this village? Visitors will no longer be able to open its code.")) return;
+      event.currentTarget.disabled = true;
+      if (await stopVillageSharing()) showVillageSharePanel();
+      else event.currentTarget.disabled = false;
+    });
+  }
+
+  function showVillageVisitPrompt(returnToMenu = false) {
+    const back = () => returnToMenu ? openMenu(true) : showStartScreen();
+    dom.modalLayer.innerHTML = `
+      <div class="modal-backdrop">
+        <section class="sheet-modal modal-card" role="dialog" aria-modal="true" aria-labelledby="visitVillageTitle">
+          <div class="sheet-heading"><div><span class="eyebrow">VIEW-ONLY VILLAGE VISITS</span><h2 id="visitVillageTitle">Visit a village</h2></div><button class="sheet-close" type="button" aria-label="Go back">×</button></div>
+          <p class="modal-description">Enter the owner’s six-character code. A visited village is a snapshot only: it does not simulate, use resources, or accept changes.</p>
+          <div class="visit-code-row"><label class="sr-only" for="visitVillageCodeModal">Village visit code</label><input id="visitVillageCodeModal" class="text-input visit-code-input" maxlength="6" placeholder="ABC123" autocomplete="off" autocapitalize="characters" spellcheck="false"><button id="openVillageVisitButton" class="primary-button" type="button">View village</button></div>
+        </section>
+      </div>`;
+    const input = document.getElementById("visitVillageCodeModal");
+    const visit = () => {
+      const code = normaliseVillageVisitCode(input.value);
+      if (!code) { input.focus(); return; }
+      showVillageVisit(code, returnToMenu);
+    };
+    input.addEventListener("input", () => { input.value = input.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, VILLAGE_VISIT_CODE_LENGTH); });
+    input.addEventListener("keydown", event => { if (event.key === "Enter") visit(); });
+    document.getElementById("openVillageVisitButton").addEventListener("click", visit);
+    dom.modalLayer.querySelector(".sheet-close").addEventListener("click", back);
+  }
+
+  function sharedVillageFallbackMap(buildings) {
+    const tiles = (Array.isArray(buildings) ? buildings : []).slice(0, 500).map(building => {
+      const x = clamp(Number(building?.x) || 0, 0, WORLD_SIZE - 1);
+      const y = clamp(Number(building?.y) || 0, 0, WORLD_SIZE - 1);
+      const w = clamp(Number(building?.w) || 1, 1, WORLD_SIZE - x);
+      const h = clamp(Number(building?.h) || 1, 1, WORLD_SIZE - y);
+      const title = escapeHtml(BUILDINGS[building?.type]?.name || "Village building");
+      return `<i class="village-preview-building" title="${title}" style="left:${x}%;top:${y}%;width:${w}%;height:${h}%"></i>`;
+    }).join("");
+    return `<div class="village-preview-map" role="img" aria-label="Shared village map with ${Array.isArray(buildings) ? buildings.length : 0} buildings">${tiles}</div>`;
+  }
+
+  function isSharedVillageImage(value) {
+    return typeof value === "string" && value.length <= 700_000 && /^data:image\/(?:jpeg|png);base64,[a-z0-9+/=]+$/i.test(value);
+  }
+
+  async function showVillageVisit(code, returnToMenu = false) {
+    const back = () => returnToMenu ? openMenu(true) : showStartScreen();
+    dom.modalLayer.innerHTML = `<div class="modal-backdrop"><section class="sheet-modal modal-card" role="dialog" aria-modal="true" aria-labelledby="visitLoadingTitle"><div class="sheet-heading"><div><span class="eyebrow">VIEW-ONLY VILLAGE VISITS</span><h2 id="visitLoadingTitle">Opening ${escapeHtml(code)}</h2></div></div><p class="modal-description">Finding the latest shared village…</p></section></div>`;
+    try {
+      const payload = await villageApiRequest(`/api/villages/${encodeURIComponent(code)}`);
+      const village = payload.village;
+      if (!village || typeof village !== "object") throw new Error("That village snapshot could not be read.");
+      const eco = Object.values(village.ecosystem || {}).reduce((total, value, _, values) => total + Number(value || 0) / Math.max(1, values.length), 0);
+      const status = payload.online ? "Owner is playing now · live snapshot" : "Owner is offline · last shared snapshot";
+      const preview = isSharedVillageImage(village.mapImage)
+        ? `<img class="village-preview" src="${village.mapImage}" alt="Latest shared view of ${escapeHtml(village.villageName || "this village")}">`
+        : sharedVillageFallbackMap(village.buildings);
+      dom.modalLayer.innerHTML = `
+        <div class="modal-backdrop">
+          <section class="sheet-modal modal-card village-visit-panel" role="dialog" aria-modal="true" aria-labelledby="visitVillageTitle">
+            <div class="sheet-heading"><div><span class="eyebrow">${payload.online ? "ONLINE VILLAGE" : "OFFLINE SNAPSHOT"}</span><h2 id="visitVillageTitle">${escapeHtml(String(village.villageName || "Wildroot Village"))}</h2></div><button class="sheet-close" type="button" aria-label="Go back">×</button></div>
+            <p class="modal-description">${escapeHtml(status)} · Code ${escapeHtml(code)}. Time is never simulated for visitors.</p>
+            ${preview}
+            <div class="village-summary-grid">
+              <div><small>Day</small><strong>${Math.max(1, Math.floor(Number(village.day) || 1))} · ${escapeHtml(village.season?.icon || "◇")} ${escapeHtml(village.season?.name || "Season")}</strong></div>
+              <div><small>People</small><strong>${Math.max(0, Math.floor(Number(village.population) || 0)).toLocaleString()}</strong></div>
+              <div><small>Ecosystem</small><strong>${Math.round(eco)}%</strong></div>
+              <div><small>Coins</small><strong>${Math.max(0, Math.floor(Number(village.coins) || 0)).toLocaleString()}</strong></div>
+              <div><small>Food / Water</small><strong>${Math.floor(Number(village.resources?.food) || 0).toLocaleString()} / ${Math.floor(Number(village.resources?.water) || 0).toLocaleString()}</strong></div>
+              <div><small>Timber / Stone</small><strong>${Math.floor(Number(village.resources?.wood) || 0).toLocaleString()} / ${Math.floor(Number(village.resources?.stone) || 0).toLocaleString()}</strong></div>
+            </div>
+            <div class="menu-actions"><button id="visitVillageBackButton" class="primary-button" type="button">Back</button></div>
+          </section>
+        </div>`;
+      dom.modalLayer.querySelector(".sheet-close").addEventListener("click", back);
+      document.getElementById("visitVillageBackButton").addEventListener("click", back);
+    } catch (error) {
+      dom.modalLayer.innerHTML = `<div class="modal-backdrop"><section class="sheet-modal modal-card" role="dialog" aria-modal="true" aria-labelledby="visitVillageErrorTitle"><div class="sheet-heading"><div><span class="eyebrow">VIEW-ONLY VILLAGE VISITS</span><h2 id="visitVillageErrorTitle">Village unavailable</h2></div><button class="sheet-close" type="button" aria-label="Go back">×</button></div><p class="modal-description">${escapeHtml(error.message || "That code could not be opened.")}</p><div class="menu-actions"><button id="visitVillageTryAgainButton" class="primary-button" type="button">Try another code</button></div></section></div>`;
+      dom.modalLayer.querySelector(".sheet-close").addEventListener("click", back);
+      document.getElementById("visitVillageTryAgainButton").addEventListener("click", () => showVillageVisitPrompt(returnToMenu));
+    }
   }
 
   function ensureLearningState(target = state) {
@@ -9170,6 +9461,9 @@
       if (gameActive && !dom.modalLayer.children.length && event.key.toLowerCase() === "f") centreMap();
     });
     window.addEventListener("beforeunload", saveGame);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") publishSharedVillage({ force: true });
+    });
   }
 
   function gameLoop(now) {
@@ -9835,6 +10129,9 @@
     renderAll();
     showStartScreen();
     installTestHooks();
+    window.setInterval(() => {
+      if (gameActive && document.visibilityState === "visible") publishSharedVillage();
+    }, VILLAGE_SHARE_PUBLISH_INTERVAL_MS);
     window.requestAnimationFrame(gameLoop);
   }
 

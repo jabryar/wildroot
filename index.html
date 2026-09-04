@@ -258,6 +258,16 @@
             <div id="saveSlotList" class="save-slot-list" aria-live="polite"></div>
           </section>
 
+          <section class="village-visit-card" aria-labelledby="visitVillageTitle">
+            <span class="eyebrow" id="visitVillageTitle">VISIT A VILLAGE</span>
+            <p>Enter a player’s six-character code to view their latest shared village. It never runs while they are away.</p>
+            <div class="visit-code-row">
+              <label class="sr-only" for="visitVillageCode">Village visit code</label>
+              <input id="visitVillageCode" class="text-input visit-code-input" maxlength="6" placeholder="ABC123" autocomplete="off" autocapitalize="characters" spellcheck="false">
+              <button id="visitVillageButton" class="secondary-button" type="button">View village</button>
+            </div>
+          </section>
+
           <div id="freeplaySetup">
             <label class="field-label" for="newVillageName">Name your settlement</label>
             <input id="newVillageName" class="text-input" maxlength="28" value="Mossbank Clearing" autocomplete="off">
